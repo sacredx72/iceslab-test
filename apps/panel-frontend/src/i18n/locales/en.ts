@@ -740,8 +740,11 @@ export default {
   },
 
   loginPage: {
-    topbarVersion: 'V1.0 · Operator panel',
-    topbarStatus: 'All systems normal',
+    // {{version}} injected at runtime from package.json via vite-define.
+    topbarVersion: 'v{{version}} · Operator panel · Alpha',
+    topbarStatusNormal: 'Backend reachable',
+    topbarStatusDegraded: 'Backend degraded',
+    topbarStatusDown: 'Backend unreachable',
     signInBadge: 'Sign in',
     heroLine1: 'Operator',
     heroLine2: 'console.',
@@ -754,8 +757,7 @@ export default {
     bootstrapTo: 'Bootstrap {{brand}}',
     continueAction: 'Continue →',
     createAdminAction: 'Create admin →',
-    passkeyHint: 'Passkey, Telegram, GitHub',
-    soonLabel: 'Soon',
+    bootstrapHint: 'First admin has full panel access. Choose a strong password — bootstrap runs once.',
     signInFailed: 'Sign-in failed',
     unknownError: 'Unknown error',
   },

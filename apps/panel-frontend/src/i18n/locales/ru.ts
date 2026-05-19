@@ -744,8 +744,10 @@ export default {
   },
 
   loginPage: {
-    topbarVersion: 'V1.0 · Operator panel',
-    topbarStatus: 'Все системы в норме',
+    topbarVersion: 'v{{version}} · Operator panel · Alpha',
+    topbarStatusNormal: 'Backend доступен',
+    topbarStatusDegraded: 'Backend деградирует',
+    topbarStatusDown: 'Backend недоступен',
     signInBadge: 'Вход',
     heroLine1: 'Консоль',
     heroLine2: 'оператора.',
@@ -758,8 +760,7 @@ export default {
     bootstrapTo: 'Bootstrap {{brand}}',
     continueAction: 'Продолжить →',
     createAdminAction: 'Создать админа →',
-    passkeyHint: 'Passkey, Telegram, GitHub',
-    soonLabel: 'Скоро',
+    bootstrapHint: 'У первого админа полный доступ к панели. Выбери надёжный пароль — bootstrap запускается один раз.',
     signInFailed: 'Не удалось войти',
     unknownError: 'Неизвестная ошибка',
   },

@@ -4,7 +4,7 @@ import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { fetchAuthStatus, login, register, type LoginResponse } from '../lib/api';
+import { fetchAuthStatus, login, register, type LoginResponse, api } from '../lib/api';
 import { useAuth } from '../stores/auth';
 import { useBrandName } from '../hooks/useBrandName';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
@@ -17,6 +17,8 @@ const MIST = '#7A8BA3';
 const CYAN = '#7DD3FC';
 const CYAN2 = '#67E8F9';
 const MOSS = '#A7D8B9';
+const AMBER = '#F5D585';
+const RUST = '#E89B8B';
 
 const DISPLAY = { fontFamily: "'Space Grotesk', Inter, sans-serif" };
 const MONO_LABEL = {
@@ -38,6 +40,30 @@ export function LoginPage() {
     queryFn: fetchAuthStatus,
     staleTime: 0,
   });
+
+  // Live backend health probe — polls /health every 10s so the top-bar
+  // status pill reflects reality, not a static "all systems normal" label.
+  // /health is public (no auth gate) so we can call it from the login page.
+  const healthQuery = useQuery({
+    queryKey: ['health'],
+    queryFn: async () => {
+      const { data } = await api.get<{ status: string }>('/health');
+      return data;
+    },
+    refetchInterval: 10_000,
+    retry: false,
+  });
+  const backendStatus: 'normal' | 'degraded' | 'down' =
+    healthQuery.isError ? 'down' :
+    healthQuery.data?.status === 'ok' ? 'normal' : 'degraded';
+  const statusColor =
+    backendStatus === 'normal' ? MOSS :
+    backendStatus === 'degraded' ? AMBER : RUST;
+  const statusLabel = t(
+    backendStatus === 'normal' ? 'loginPage.topbarStatusNormal' :
+    backendStatus === 'degraded' ? 'loginPage.topbarStatusDegraded' :
+    'loginPage.topbarStatusDown'
+  );
 
   const form = useForm({
     initialValues: { username: '', password: '' },
@@ -124,18 +150,20 @@ export function LoginPage() {
           </Text>
         </Box>
         <Box style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
-          <Text style={MONO_LABEL}>{t('loginPage.topbarVersion')}</Text>
+          <Text style={MONO_LABEL}>
+            {t('loginPage.topbarVersion', { version: __APP_VERSION__ })}
+          </Text>
           <Box style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span
               style={{
                 width: 6,
                 height: 6,
                 borderRadius: '50%',
-                backgroundColor: MOSS,
-                boxShadow: `0 0 6px ${MOSS}99`,
+                backgroundColor: statusColor,
+                boxShadow: `0 0 6px ${statusColor}99`,
               }}
             />
-            <Text style={MONO_LABEL}>{t('loginPage.topbarStatus')}</Text>
+            <Text style={MONO_LABEL}>{statusLabel}</Text>
           </Box>
           <LanguageSwitcher />
         </Box>
@@ -291,17 +319,19 @@ export function LoginPage() {
               </Stack>
             </form>
 
-            <Box
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginTop: 20,
-              }}
-            >
-              <Text style={{ color: MIST, fontSize: 12 }}>{t('loginPage.passkeyHint')}</Text>
-              <Text style={MONO_LABEL}>{t('loginPage.soonLabel')}</Text>
-            </Box>
+            {isBootstrap && (
+              <Box
+                style={{
+                  marginTop: 20,
+                  paddingTop: 16,
+                  borderTop: `1px solid ${HAIRLINE}`,
+                }}
+              >
+                <Text style={{ color: MIST, fontSize: 12, lineHeight: 1.5 }}>
+                  {t('loginPage.bootstrapHint')}
+                </Text>
+              </Box>
+            )}
           </Box>
         </Box>
       </Box>
