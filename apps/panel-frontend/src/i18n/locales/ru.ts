@@ -760,7 +760,7 @@ export default {
     bootstrapTo: 'Bootstrap {{brand}}',
     continueAction: 'Продолжить →',
     createAdminAction: 'Создать админа →',
-    bootstrapHint: 'У первого админа полный доступ к панели. Выбери надёжный пароль — bootstrap запускается один раз.',
+    bootstrapHint: 'У первого админа полный доступ к панели. Выбери надёжный пароль, bootstrap запускается один раз.',
     signInFailed: 'Не удалось войти',
     unknownError: 'Неизвестная ошибка',
   },

@@ -4,7 +4,7 @@
  *
  * The modern async API works only in "secure contexts" (https or localhost).
  * Admins running the panel on plain http://<vps-ip>:8080 hit silent failures
- * with it — the legacy execCommand path covers that case.
+ * with it, the legacy execCommand path covers that case.
  */
 export async function copyToClipboard(text: string): Promise<void> {
   if (

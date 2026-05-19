@@ -41,7 +41,7 @@ export function LoginPage() {
     staleTime: 0,
   });
 
-  // Live backend health probe — polls /health every 10s so the top-bar
+  // Live backend health probe, polls /health every 10s so the top-bar
   // status pill reflects reality, not a static "all systems normal" label.
   // /health is public (no auth gate) so we can call it from the login page.
   const healthQuery = useQuery({

@@ -17,7 +17,7 @@ interface AuthState {
 /**
  * Zustand store for the JWT and admin info, persisted to localStorage. The
  * Axios interceptor in `lib/api.ts` reads `token` from this store on every
- * request — there's no other source of truth.
+ * request, there's no other source of truth.
  */
 export const useAuth = create<AuthState>()(
   persist(

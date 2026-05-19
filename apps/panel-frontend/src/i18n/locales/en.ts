@@ -757,7 +757,7 @@ export default {
     bootstrapTo: 'Bootstrap {{brand}}',
     continueAction: 'Continue →',
     createAdminAction: 'Create admin →',
-    bootstrapHint: 'First admin has full panel access. Choose a strong password — bootstrap runs once.',
+    bootstrapHint: 'First admin has full panel access. Choose a strong password, bootstrap runs once.',
     signInFailed: 'Sign-in failed',
     unknownError: 'Unknown error',
   },

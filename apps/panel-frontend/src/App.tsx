@@ -21,7 +21,7 @@ export default function App() {
           <Route path="/users" element={<UsersPage />} />
           <Route path="/nodes" element={<NodesPage />} />
           <Route path="/profiles" element={<ProfilesPage />} />
-          {/* Slice 27 — /inbounds replaced by /profiles. Keep redirect so
+          {/* Slice 27, /inbounds replaced by /profiles. Keep redirect so
               existing bookmarks don't 404. */}
           <Route path="/inbounds" element={<Navigate to="/profiles" replace />} />
           <Route path="/squads" element={<SquadsPage />} />

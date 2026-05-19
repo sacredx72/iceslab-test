@@ -214,7 +214,7 @@ export function AppLayout() {
 
   function handleLogout() {
     clearSession();
-    // Drop cached queries — otherwise next admin on this browser sees the
+    // Drop cached queries, otherwise next admin on this browser sees the
     // previous session's data flash before refetch.
     qc.clear();
     navigate('/login', { replace: true });

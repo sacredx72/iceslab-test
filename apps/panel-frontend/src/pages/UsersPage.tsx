@@ -235,7 +235,7 @@ export function UsersPage() {
     return s;
   }, [allUsers]);
 
-  // Reset page whenever filter or search narrows the set — sticking on page
+  // Reset page whenever filter or search narrows the set, sticking on page
   // 5 after filtering to 3 matches gives an empty table.
   useEffect(() => {
     setPage(1);
