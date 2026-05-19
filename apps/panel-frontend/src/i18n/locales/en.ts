@@ -418,12 +418,14 @@ export default {
   },
   squads: {
     title: 'Internal squads',
-    subtitle: "Group ACL - which inbounds each user sees in their subscription",
+    subtitle: 'Group ACL: which inbounds each user sees in their subscription',
     create: 'Create',
     refresh: 'Refresh',
     open: 'Open',
     searchPlaceholder: 'Search by name or description…',
     empty: 'No squads.',
+    allDefaultName: 'All',
+    allDefaultDescription: 'Default group; new users join automatically.',
     deleteTitle: 'Delete squad "{{name}}"?',
     deleteBody: 'Users stay, but lose access to profiles bound to this squad. Users with no other squad get re-added to All.',
     deleteAllProtected: 'Squad "All" is system-protected and cannot be deleted.',
@@ -684,7 +686,7 @@ export default {
     profilesEyebrow: 'Inbound templates · 7 protocols supported',
     profilesTitle: 'Profiles.',
     profilesSubtitle:
-      'One profile is a logical inbound - protocol, obfuscation, DPI shape. Bind it to N nodes; one user picks it up via subscription.',
+      'One profile is a logical inbound: protocol, obfuscation, DPI shape. Bind it to N nodes and users pick it up via subscription.',
     inboundsEyebrow: 'Wired endpoints · {{count}} {{label}}',
     inboundsLabelOne: 'inbound',
     inboundsLabelMany: 'inbounds',
@@ -694,7 +696,7 @@ export default {
     nodesEyebrow: 'Fleet · {{vps}} VPS · {{countries}} countries',
     nodesTitle: 'Nodes.',
     nodesSubtitle:
-      'One node runs one protocol core. Panel pushes config over mTLS - agent applies and reports back.',
+      'One node runs one protocol core. Panel pushes config over mTLS, agent applies and reports back.',
     squadsEyebrow: 'Group ACL · {{count}} {{label}}',
     squadsLabelOne: 'squad',
     squadsLabelMany: 'squads',

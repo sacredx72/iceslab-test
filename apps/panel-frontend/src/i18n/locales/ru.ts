@@ -421,14 +421,16 @@ export default {
   },
   squads: {
     title: 'Внутренние сквады',
-    subtitle: 'Group ACL - кто какие inbound\'ы видит в подписке',
+    subtitle: 'Group ACL: кто какие inbound-ы видит в подписке',
     create: 'Создать',
     refresh: 'Обновить',
     open: 'Открыть',
     searchPlaceholder: 'Поиск по имени или описанию…',
     empty: 'Сквадов нет.',
+    allDefaultName: 'All',
+    allDefaultDescription: 'Группа по умолчанию: новые пользователи попадают сюда автоматически.',
     deleteTitle: 'Удалить сквад «{{name}}»?',
-    deleteBody: 'Пользователи останутся, но потеряют доступ к привязанным к этому скваду профилям. Если других сквадов нет - будут перенесены в All.',
+    deleteBody: 'Пользователи останутся, но потеряют доступ к привязанным к этому скваду профилям. Если других сквадов нет, они вернутся в All.',
     deleteAllProtected: 'Сквад «All» защищён системой и не удаляется.',
     notify: {
       created: 'Сквад создан',
@@ -688,7 +690,7 @@ export default {
     profilesEyebrow: 'Шаблоны inbound\'ов · 7 протоколов поддерживается',
     profilesTitle: 'Профили.',
     profilesSubtitle:
-      'Один профиль - это логический inbound: протокол, обфускация, форма DPI. Привязал к N нодам - пользователь подхватит через подписку.',
+      'Профиль задаёт один логический inbound: протокол, обфускацию, форму DPI. Привяжи к N нодам, пользователь подхватит через подписку.',
     inboundsEyebrow: 'Поднятые endpoint\'ы · {{count}} {{label}}',
     inboundsLabelOne: 'inbound',
     inboundsLabelMany: 'inbound\'ов',
@@ -698,7 +700,7 @@ export default {
     nodesEyebrow: 'Флот · {{vps}} VPS · {{countries}} стран',
     nodesTitle: 'Ноды.',
     nodesSubtitle:
-      'Одна нода - одно ядро протокола. Панель пушит конфиг по mTLS, агент применяет и отчитывается обратно.',
+      'Одна нода держит одно ядро протокола. Панель пушит конфиг по mTLS, агент применяет и отчитывается обратно.',
     squadsEyebrow: 'Группа ACL · {{count}} {{label}}',
     squadsLabelOne: 'сквад',
     squadsLabelMany: 'сквадов',
