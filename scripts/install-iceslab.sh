@@ -63,7 +63,9 @@ elapsed_step() {
 }
 
 STEP_N=0
-STEP_TOTAL=8
+# 1 Prereqs, 2 Firewall, 3 Docker, 4 Source, 5 Config, 6 Pre-pull, 7 Build,
+# 8 Migrate, 9 Launch. +1 Caddy if PANEL_DOMAIN set (set further below).
+STEP_TOTAL=9
 step() {
   # Print previous step's wall-clock duration before moving on (skipped on the
   # very first step where LAST_STEP_LABEL is the placeholder).
@@ -94,10 +96,15 @@ on_error() {
   printf '  Total time: %s\n' "$(elapsed_total)" >&2
   printf '\n' >&2
   # If the operator used the recommended `tee /tmp/install-panel.log`, show
-  # the tail so they don't have to scroll terminal history.
+  # the tail so they don't have to scroll terminal history. Filter out our
+  # own error-block lines so the tail doesn't recursively show this very
+  # error message (tee captures stderr, we read the same file = feedback loop).
   if [[ -r /tmp/install-panel.log ]]; then
     printf '  Last 30 log lines (/tmp/install-panel.log):\n' >&2
-    tail -30 /tmp/install-panel.log | sed "s/^/    /" >&2
+    tail -60 /tmp/install-panel.log \
+      | grep -v -E '^(✗ install-iceslab.*failed|  (Step|Where|Command|Exit|Step time|Total time|Last [0-9]+ log lines|  Re-run is idempotent|  install command again):|    )' \
+      | tail -30 \
+      | sed "s/^/    /" >&2
     printf '\n' >&2
   fi
   printf '  Re-run is idempotent — fix the cause above, then run the same\n' >&2
@@ -195,7 +202,7 @@ if [[ -z "$PANEL_DOMAIN" && -r /dev/tty ]]; then
     PANEL_DOMAIN="${PANEL_DOMAIN#http://}"
     PANEL_DOMAIN="${PANEL_DOMAIN#https://}"
     PANEL_DOMAIN="${PANEL_DOMAIN%/}"
-    STEP_TOTAL=9
+    STEP_TOTAL=10
 
     # Quick sanity-check on the value before we commit to it. Catches
     # the typo case where the admin types a single word without a dot.

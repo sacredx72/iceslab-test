@@ -149,7 +149,10 @@ on_error() {
   printf '\n' >&2
   if [[ -r /tmp/install-node.log ]]; then
     printf '  Last 30 log lines (/tmp/install-node.log):\n' >&2
-    tail -30 /tmp/install-node.log | sed "s/^/    /" >&2
+    tail -60 /tmp/install-node.log \
+      | grep -v -E '^(✗ install-iceslab.*failed|  (Step|Where|Command|Exit|Step time|Total time|Last [0-9]+ log lines|  Re-run with):|    )' \
+      | tail -30 \
+      | sed "s/^/    /" >&2
     printf '\n' >&2
   fi
   printf '  Re-run with the same flags — install is idempotent.\n' >&2
