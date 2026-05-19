@@ -1,0 +1,1032 @@
+import axios, { type AxiosError } from 'axios';
+import { useAuth } from '../stores/auth';
+import { queryClient } from './queryClient';
+
+export const API_BASE_URL =
+  (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://localhost:3000';
+
+export const api = axios.create({
+  baseURL: API_BASE_URL,
+  headers: { 'Content-Type': 'application/json' },
+});
+
+// Attach JWT to every request when we have one.
+api.interceptors.request.use((config) => {
+  const token = useAuth.getState().token;
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// On 401 the token is bad/expired — clear the session AND drop the React
+// Query cache so the next admin signing in on the same browser doesn't
+// see the previous admin's user list / dashboard flash before refetch.
+api.interceptors.response.use(
+  (res) => res,
+  (err: AxiosError) => {
+    if (err.response?.status === 401) {
+      useAuth.getState().clearSession();
+      queryClient.clear();
+    }
+    return Promise.reject(err);
+  },
+);
+
+// ───── Typed helpers for the endpoints we know about ─────
+
+export interface AuthStatusResponse {
+  authentication: { password: { enabled: boolean } };
+  registration: { enabled: boolean };
+  /** Panel public URL + subscription path prefix — used by the SPA to
+   *  show admins the FULL copy-paste subscription URL on the user form,
+   *  rather than just the path. Both come from backend env. */
+  panel?: {
+    publicUrl: string;
+    subscriptionPathPrefix: string;
+  };
+}
+
+export interface LoginResponse {
+  admin: { id: string; username: string; role: string; createdAt: string; updatedAt: string };
+  token: string;
+}
+
+export interface RegisterResponse {
+  id: string;
+  username: string;
+  role: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function fetchAuthStatus(): Promise<AuthStatusResponse> {
+  const { data } = await api.get<AuthStatusResponse>('/api/auth/status');
+  return data;
+}
+
+export async function login(username: string, password: string): Promise<LoginResponse> {
+  const { data } = await api.post<LoginResponse>('/api/auth/login', { username, password });
+  return data;
+}
+
+export async function register(username: string, password: string): Promise<RegisterResponse> {
+  const { data } = await api.post<RegisterResponse>('/api/auth/register', { username, password });
+  return data;
+}
+
+// ───── Users ─────
+
+export type TrafficLimitStrategy = 'no_reset' | 'day' | 'week' | 'month' | 'rolling';
+
+export type ProtocolName =
+  | 'hysteria'
+  | 'xray'
+  | 'amneziawg'
+  | 'naive'
+  | 'shadowsocks'
+  | 'mtproto'
+  | 'mieru';
+
+export type ShadowsocksMethod =
+  | '2022-blake3-aes-128-gcm'
+  | '2022-blake3-aes-256-gcm'
+  | '2022-blake3-chacha20-poly1305'
+  | 'chacha20-ietf-poly1305'
+  | 'aes-256-gcm'
+  | 'aes-128-gcm';
+
+export interface ShadowsocksInboundConfig {
+  method: ShadowsocksMethod;
+}
+
+export interface MtprotoInboundConfig {
+  domain: string;
+}
+
+export interface MieruInboundConfig {
+  mtu: number;
+}
+
+export interface User {
+  id: string;
+  shortId: string;
+  username: string;
+  status: string;
+  expireAt: string | null;
+  trafficLimitBytes: number | null;
+  trafficUsedBytes: number;
+  lifetimeTrafficBytes: number;
+  trafficLimitStrategy: TrafficLimitStrategy;
+  lastTrafficResetAt: string | null;
+  lastOnlineAt: string | null;
+  subscriptionToken: string;
+  subRevokedAt: string | null;
+  hwidDeviceLimit: number | null;
+  description: string | null;
+  tag: string | null;
+  telegramId: string | null;
+  email: string | null;
+  enabledProtocols: ProtocolName[];
+  /** Slice 26 — squads the user belongs to. Always includes ALL_SQUAD_ID. */
+  groupIds: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UsersListResponse {
+  users: User[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface CreateUserInput {
+  username: string;
+  expireDays?: number | null;
+  trafficLimitGb?: number | null;
+  trafficLimitStrategy?: TrafficLimitStrategy;
+  description?: string | null;
+  tag?: string | null;
+  email?: string | null;
+  telegramId?: string | null;
+  hwidDeviceLimit?: number | null;
+  enabledProtocols?: ProtocolName[];
+  /** Slice 26 — squad membership. Empty/undefined → backend auto-adds to All. */
+  groupIds?: string[];
+}
+
+export interface UpdateUserInput {
+  status?: 'active' | 'disabled';
+  trafficLimitGb?: number | null;
+  trafficLimitStrategy?: TrafficLimitStrategy;
+  expireAt?: string | null;
+  description?: string | null;
+  tag?: string | null;
+  email?: string | null;
+  telegramId?: string | null;
+  hwidDeviceLimit?: number | null;
+  enabledProtocols?: ProtocolName[];
+  /** Slice 26 — replaces the full squad set when provided. */
+  groupIds?: string[];
+}
+
+export async function listUsers(params?: {
+  page?: number;
+  limit?: number;
+  status?: string;
+  search?: string;
+}): Promise<UsersListResponse> {
+  const { data } = await api.get<UsersListResponse>('/api/users', { params });
+  return data;
+}
+
+export async function createUser(input: CreateUserInput): Promise<User> {
+  const { data } = await api.post<User>('/api/users', input);
+  return data;
+}
+
+export async function updateUser(id: string, input: UpdateUserInput): Promise<User> {
+  const { data } = await api.put<User>(`/api/users/${id}`, input);
+  return data;
+}
+
+export async function deleteUser(id: string): Promise<void> {
+  await api.delete(`/api/users/${id}`);
+}
+
+/** Helper to build a copy-pasteable subscription URL for a user.
+ *  Pass `panel` (from /api/auth/status) to substitute the configured
+ *  public URL + path prefix; falls back to API_BASE_URL + /sub when
+ *  the metadata isn't available (dev / status endpoint failed). */
+export function subscriptionUrl(
+  token: string,
+  panel?: { publicUrl: string; subscriptionPathPrefix: string },
+): string {
+  if (panel?.publicUrl) {
+    return `${panel.publicUrl}${panel.subscriptionPathPrefix}/${token}`;
+  }
+  return `${API_BASE_URL}/sub/${token}`;
+}
+
+// ───── Per-user subscription endpoints (admin view) ─────
+
+export interface UserEndpoint {
+  protocol: string;
+  nodeName: string;
+  host: string;
+  port: number;
+  uri: string;
+}
+
+export async function fetchUserEndpoints(id: string): Promise<{ endpoints: UserEndpoint[] }> {
+  const { data } = await api.get<{ endpoints: UserEndpoint[] }>(`/api/users/${id}/endpoints`);
+  return data;
+}
+
+// ───── Nodes ─────
+
+export type NodeProtocol =
+  | 'xray'
+  | 'hysteria'
+  | 'amneziawg'
+  | 'naive'
+  | 'shadowsocks'
+  | 'mtproto'
+  | 'mieru';
+
+export interface Node {
+  id: string;
+  name: string;
+  address: string;
+  protocol: NodeProtocol;
+  countryCode: string | null;
+  status: string;
+  lastStatusChange: string | null;
+  lastStatusMessage: string | null;
+  consumptionMultiplier: string;
+  // Slice 27.5
+  regionId: string | null;
+  maxUsers: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Region {
+  id: string;
+  name: string;
+  code: string;
+  nodeCount?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BootstrapInfo {
+  /** Single-use token (URL-safe, ~32 chars). Survives the 4 KB TTY paste limit. */
+  token: string;
+  /** ISO timestamp when the token stops being redeemable. */
+  expiresAt: string;
+  /** Pre-rendered single-line install command, ready to copy-paste on the node. */
+  command: string;
+}
+
+/** The create response carries the one-time payload + a bootstrap token. */
+export interface NodeWithPayload extends Node {
+  payload: string;
+  bootstrap: BootstrapInfo;
+}
+
+export async function refreshNodeBootstrap(id: string): Promise<BootstrapInfo> {
+  const { data } = await api.post<BootstrapInfo>(`/api/nodes/${id}/bootstrap`);
+  return data;
+}
+
+export interface NodesListResponse {
+  nodes: Node[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface CreateNodeInput {
+  name: string;
+  address: string;
+  protocol: NodeProtocol;
+  countryCode?: string | null;
+  consumptionMultiplier?: number;
+  regionId?: string | null;
+  maxUsers?: number | null;
+}
+
+export interface UpdateNodeInput {
+  name?: string;
+  address?: string;
+  protocol?: NodeProtocol;
+  countryCode?: string | null;
+  consumptionMultiplier?: number;
+  regionId?: string | null;
+  maxUsers?: number | null;
+}
+
+export async function listNodes(params?: {
+  page?: number;
+  limit?: number;
+  status?: string;
+  regionId?: string;
+}): Promise<NodesListResponse> {
+  const { data } = await api.get<NodesListResponse>('/api/nodes', { params });
+  return data;
+}
+
+// ───── Regions (slice 27.5) ─────
+
+export async function listRegions(): Promise<{ regions: Region[] }> {
+  const { data } = await api.get<{ regions: Region[] }>('/api/regions');
+  return data;
+}
+
+export async function createRegion(input: { name: string; code: string }): Promise<Region> {
+  const { data } = await api.post<Region>('/api/regions', input);
+  return data;
+}
+
+export async function updateRegion(
+  id: string,
+  input: { name?: string; code?: string },
+): Promise<Region> {
+  const { data } = await api.put<Region>(`/api/regions/${id}`, input);
+  return data;
+}
+
+export async function deleteRegion(id: string): Promise<void> {
+  await api.delete(`/api/regions/${id}`);
+}
+
+export async function createNode(input: CreateNodeInput): Promise<NodeWithPayload> {
+  const { data } = await api.post<NodeWithPayload>('/api/nodes', input);
+  return data;
+}
+
+export async function updateNode(id: string, input: UpdateNodeInput): Promise<Node> {
+  const { data } = await api.put<Node>(`/api/nodes/${id}`, input);
+  return data;
+}
+
+export async function deleteNode(id: string): Promise<void> {
+  await api.delete(`/api/nodes/${id}`);
+}
+
+// ───── Subscription Response Rules (SRR) ─────
+
+export type SubscriptionFormat = 'plain' | 'json' | 'clash' | 'singbox' | 'wgconf' | 'xrayjson';
+
+export interface SrrRule {
+  id: string;
+  name: string;
+  uaPattern: string;
+  format: SubscriptionFormat;
+  priority: number;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateSrrInput {
+  name: string;
+  uaPattern: string;
+  format: SubscriptionFormat;
+  priority?: number;
+  enabled?: boolean;
+}
+
+export interface UpdateSrrInput {
+  name?: string;
+  uaPattern?: string;
+  format?: SubscriptionFormat;
+  priority?: number;
+  enabled?: boolean;
+}
+
+export interface TestSrrResponse {
+  /** null when no rule matched. */
+  format: SubscriptionFormat | null;
+  userAgent: string;
+}
+
+export async function listSrrRules(): Promise<{ rules: SrrRule[] }> {
+  const { data } = await api.get<{ rules: SrrRule[] }>('/api/srr');
+  return data;
+}
+
+export async function createSrrRule(input: CreateSrrInput): Promise<SrrRule> {
+  const { data } = await api.post<SrrRule>('/api/srr', input);
+  return data;
+}
+
+export async function updateSrrRule(id: string, input: UpdateSrrInput): Promise<SrrRule> {
+  const { data } = await api.put<SrrRule>(`/api/srr/${id}`, input);
+  return data;
+}
+
+export async function deleteSrrRule(id: string): Promise<void> {
+  await api.delete(`/api/srr/${id}`);
+}
+
+// ───── Inbounds ─────
+
+export interface HysteriaInboundConfig {
+  obfsPassword?: string;
+  masqueradeUrl?: string;
+  brutalUpMbps?: number;
+  brutalDownMbps?: number;
+}
+
+export type XrayNetwork = 'raw' | 'xhttp' | 'ws' | 'grpc' | 'httpupgrade' | 'kcp';
+
+export interface XrayInboundConfig {
+  realityDest: string;
+  realityServerNames: string[];
+  realityShortIds: string[];
+  realityPrivateKey: string;
+  realityPublicKey: string;
+  flow?: string;
+  fingerprint?: string;
+  network?: XrayNetwork;
+  path?: string;
+  host?: string;
+  serviceName?: string;
+  /** Slice 24c part 3 — `vless` (default) or `trojan` over the same REALITY
+   *  stack. Empty/undefined → server falls back to vless. */
+  subprotocol?: 'vless' | 'trojan';
+}
+
+export interface AmneziawgObfuscation {
+  jc: number;
+  jmin: number;
+  jmax: number;
+  s1: number;
+  s2: number;
+  s3: number;
+  s4: number;
+  h1: number;
+  h2: number;
+  h3: number;
+  h4: number;
+  /** v2.0 mimicry packets (hex). Optional — Zod defaults empty. */
+  i1?: string;
+  i2?: string;
+  i3?: string;
+  i4?: string;
+  i5?: string;
+}
+
+export interface AmneziawgInboundConfig {
+  subnet: string;
+  serverPrivateKey: string;
+  serverPublicKey: string;
+  obfuscation: AmneziawgObfuscation;
+}
+
+export interface NaiveInboundConfig {
+  hostname: string;
+  tlsEmail: string;
+  masqueradeRoot: string;
+}
+
+export type InboundConfig =
+  | HysteriaInboundConfig
+  | XrayInboundConfig
+  | AmneziawgInboundConfig
+  | NaiveInboundConfig
+  | ShadowsocksInboundConfig
+  | MtprotoInboundConfig
+  | MieruInboundConfig;
+
+export interface Inbound {
+  id: string;
+  nodeId: string;
+  protocol: ProtocolName;
+  name: string;
+  port: number;
+  /** Override of the public host emitted in client URIs. NULL → fall back
+   *  to `node.address`. Slice 25 — separates control-plane endpoint from
+   *  client-facing FQDN. */
+  publicHost: string | null;
+  /** Override of the public port. NULL → use `port`. */
+  publicPort: number | null;
+  config: InboundConfig;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateInboundInput {
+  nodeId: string;
+  protocol: ProtocolName;
+  name: string;
+  port: number;
+  enabled?: boolean;
+  publicHost?: string;
+  publicPort?: number;
+  config: InboundConfig;
+}
+
+export interface UpdateInboundInput {
+  name?: string;
+  port?: number;
+  enabled?: boolean;
+  /** `null` clears the override, `undefined` keeps the current value. */
+  publicHost?: string | null;
+  publicPort?: number | null;
+  config?: InboundConfig;
+}
+
+export async function listInbounds(): Promise<{ inbounds: Inbound[] }> {
+  const { data } = await api.get<{ inbounds: Inbound[] }>('/api/inbounds');
+  return data;
+}
+
+export async function createInbound(input: CreateInboundInput): Promise<Inbound> {
+  const { data } = await api.post<Inbound>('/api/inbounds', input);
+  return data;
+}
+
+export async function updateInbound(id: string, input: UpdateInboundInput): Promise<Inbound> {
+  const { data } = await api.put<Inbound>(`/api/inbounds/${id}`, input);
+  return data;
+}
+
+export async function deleteInbound(id: string): Promise<void> {
+  await api.delete(`/api/inbounds/${id}`);
+}
+
+export interface KeypairResponse {
+  privateKey: string;
+  publicKey: string;
+}
+
+/** Generate a fresh x25519 keypair for REALITY / AmneziaWG inbound.
+ *  Same crypto, different alphabet: `xray` returns base64url (REALITY
+ *  validator rejects standard base64), `amneziawg` returns standard base64. */
+export async function generateInboundKeypair(
+  protocol: 'xray' | 'amneziawg' = 'amneziawg',
+): Promise<KeypairResponse> {
+  const { data } = await api.post<KeypairResponse>(
+    `/api/profiles/generate-keypair?protocol=${protocol}`,
+  );
+  return data;
+}
+
+export async function testSrrRule(userAgent: string): Promise<TestSrrResponse> {
+  const { data } = await api.post<TestSrrResponse>('/api/srr/test', { userAgent });
+  return data;
+}
+
+// ───── Squads (slice 26) ─────
+
+/** Stable, well-known UUID of the system "All" squad. Mirrored from
+ *  apps/panel-backend/src/modules/squads/squads.constants.ts — UI uses it
+ *  to render the row as read-only (rename/delete is rejected backend-side). */
+export const ALL_SQUAD_ID = '00000000-0000-0000-0000-000000000001';
+
+export interface Squad {
+  id: string;
+  name: string;
+  description: string | null;
+  /** Slice 27 — squad ACL is profile-level. Renamed from inboundIds. */
+  profileIds: string[];
+  memberCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateSquadInput {
+  name: string;
+  description?: string | null;
+  profileIds?: string[];
+}
+
+export interface UpdateSquadInput {
+  name?: string;
+  description?: string | null;
+  /** Replaces the full profile set when provided. */
+  profileIds?: string[];
+}
+
+export async function listSquads(): Promise<{ squads: Squad[] }> {
+  const { data } = await api.get<{ squads: Squad[] }>('/api/squads');
+  return data;
+}
+
+export async function createSquad(input: CreateSquadInput): Promise<Squad> {
+  const { data } = await api.post<Squad>('/api/squads', input);
+  return data;
+}
+
+export async function updateSquad(id: string, input: UpdateSquadInput): Promise<Squad> {
+  const { data } = await api.put<Squad>(`/api/squads/${id}`, input);
+  return data;
+}
+
+export async function deleteSquad(id: string): Promise<void> {
+  await api.delete(`/api/squads/${id}`);
+}
+
+// ───── Profiles + Bindings (slice 27) ─────
+//
+// Replaces the per-node Inbound model. A Profile is a logical inbound
+// template (shared across nodes), a Binding deploys it to a specific node
+// with optional per-node overrides.
+
+export interface Profile {
+  id: string;
+  name: string;
+  protocol: ProtocolName;
+  description: string | null;
+  config: InboundConfig;
+  enabled: boolean;
+  bindingCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Binding {
+  id: string;
+  profileId: string;
+  nodeId: string;
+  port: number;
+  publicHost: string | null;
+  publicPort: number | null;
+  overrides: Record<string, unknown> | null;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateProfileInput {
+  name: string;
+  protocol: ProtocolName;
+  description?: string | null;
+  config: InboundConfig;
+  enabled?: boolean;
+}
+
+export interface UpdateProfileInput {
+  name?: string;
+  description?: string | null;
+  enabled?: boolean;
+  config?: InboundConfig;
+}
+
+export interface CreateBindingInput {
+  profileId: string;
+  nodeId: string;
+  port: number;
+  publicHost?: string;
+  publicPort?: number;
+  overrides?: Record<string, unknown>;
+  enabled?: boolean;
+}
+
+export interface UpdateBindingInput {
+  port?: number;
+  publicHost?: string | null;
+  publicPort?: number | null;
+  overrides?: Record<string, unknown> | null;
+  enabled?: boolean;
+}
+
+export async function listProfiles(params?: {
+  protocol?: ProtocolName;
+}): Promise<{ profiles: Profile[] }> {
+  const { data } = await api.get<{ profiles: Profile[] }>('/api/profiles', { params });
+  return data;
+}
+
+export async function createProfile(input: CreateProfileInput): Promise<Profile> {
+  const { data } = await api.post<Profile>('/api/profiles', input);
+  return data;
+}
+
+export async function updateProfile(id: string, input: UpdateProfileInput): Promise<Profile> {
+  const { data } = await api.put<Profile>(`/api/profiles/${id}`, input);
+  return data;
+}
+
+export async function deleteProfile(id: string): Promise<void> {
+  await api.delete(`/api/profiles/${id}`);
+}
+
+export async function listBindings(params?: {
+  nodeId?: string;
+  profileId?: string;
+}): Promise<{ bindings: Binding[] }> {
+  const { data } = await api.get<{ bindings: Binding[] }>('/api/bindings', { params });
+  return data;
+}
+
+export async function createBinding(input: CreateBindingInput): Promise<Binding> {
+  const { data } = await api.post<Binding>('/api/bindings', input);
+  return data;
+}
+
+export async function updateBinding(id: string, input: UpdateBindingInput): Promise<Binding> {
+  const { data } = await api.put<Binding>(`/api/bindings/${id}`, input);
+  return data;
+}
+
+export async function deleteBinding(id: string): Promise<void> {
+  await api.delete(`/api/bindings/${id}`);
+}
+
+// ───── Test-Connect (slice 31) ─────
+
+export interface TestConnectResult {
+  bindingId: string;
+  hostId: string | null;
+  hostRemark: string;
+  protocol: string;
+  nodeName: string;
+  endpoint: string;
+  port: number;
+  probe: 'tcp' | 'tls' | 'skip';
+  sni?: string;
+  ok: boolean;
+  latencyMs?: number;
+  certCn?: string;
+  error?: string;
+  notes?: string;
+}
+
+export async function testConnectProfile(profileId: string): Promise<{ results: TestConnectResult[] }> {
+  const { data } = await api.post<{ results: TestConnectResult[] }>(
+    `/api/profiles/${profileId}/test-connect`,
+  );
+  return data;
+}
+
+// ───── HWID devices (slice S2) ─────
+
+export interface HwidDevice {
+  id: string;
+  userId: string;
+  hwid: string;
+  label: string | null;
+  firstSeenAt: string;
+  lastSeenAt: string;
+}
+
+export async function listUserDevices(userId: string): Promise<{ devices: HwidDevice[] }> {
+  const { data } = await api.get<{ devices: HwidDevice[] }>(
+    `/api/users/${userId}/hwid-devices`,
+  );
+  return data;
+}
+
+export async function deleteHwidDevice(id: string): Promise<void> {
+  await api.delete(`/api/hwid-devices/${id}`);
+}
+
+// ───── Hosts (slice 30) ─────
+//
+// One Binding can fan out into N Hosts in subscriptions. Each Host is a
+// distinct URL with overrides for SNI / fingerprint / path / host-header /
+// ALPN / etc. on top of the binding's base config.
+
+export type Fingerprint =
+  | 'chrome'
+  | 'firefox'
+  | 'safari'
+  | 'ios'
+  | 'android'
+  | 'edge'
+  | 'random';
+
+export interface Host {
+  id: string;
+  bindingId: string;
+  remark: string;
+  priority: number;
+  enabled: boolean;
+  addressOverride: string | null;
+  portOverride: number | null;
+  sniOverride: string | null;
+  hostHeaderOverride: string | null;
+  pathOverride: string | null;
+  fingerprintOverride: Fingerprint | null;
+  alpn: string[];
+  allowInsecure: boolean;
+  securityLayer: 'default' | 'tls' | 'none';
+  disableForFormats: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateHostInput {
+  bindingId: string;
+  remark?: string;
+  priority?: number;
+  enabled?: boolean;
+  addressOverride?: string | null;
+  portOverride?: number | null;
+  sniOverride?: string | null;
+  hostHeaderOverride?: string | null;
+  pathOverride?: string | null;
+  fingerprintOverride?: Fingerprint | null;
+  alpn?: string[];
+  allowInsecure?: boolean;
+  securityLayer?: 'default' | 'tls' | 'none';
+  disableForFormats?: string[];
+}
+
+export type UpdateHostInput = Partial<Omit<CreateHostInput, 'bindingId'>>;
+
+export async function listHosts(params?: {
+  bindingId?: string;
+  profileId?: string;
+}): Promise<{ hosts: Host[] }> {
+  const { data } = await api.get<{ hosts: Host[] }>('/api/hosts', { params });
+  return data;
+}
+
+export async function createHost(input: CreateHostInput): Promise<Host> {
+  const { data } = await api.post<Host>('/api/hosts', input);
+  return data;
+}
+
+export async function updateHost(id: string, input: UpdateHostInput): Promise<Host> {
+  const { data } = await api.put<Host>(`/api/hosts/${id}`, input);
+  return data;
+}
+
+export async function deleteHost(id: string): Promise<void> {
+  await api.delete(`/api/hosts/${id}`);
+}
+
+export async function reorderHosts(hostIds: string[]): Promise<{ hosts: Host[] }> {
+  const { data } = await api.put<{ hosts: Host[] }>('/api/hosts/reorder', {
+    hostIds,
+  });
+  return data;
+}
+
+// ───── API tokens ─────
+
+export interface ApiToken {
+  id: string;
+  name: string;
+  scopes: string[];
+  lastUsedAt: string | null;
+  createdAt: string;
+}
+
+/** POST /api/api-tokens response — includes the plaintext token ONCE.
+ *  Panel never shows it again after this. */
+export interface CreatedApiToken extends ApiToken {
+  /** Plaintext bearer token, e.g. `icp_AbC123...`. Copy it now. */
+  token: string;
+}
+
+export async function listApiTokens(): Promise<{ tokens: ApiToken[] }> {
+  const { data } = await api.get<{ tokens: ApiToken[] }>('/api/api-tokens');
+  return data;
+}
+
+export async function createApiToken(input: {
+  name: string;
+  scopes?: string[];
+}): Promise<CreatedApiToken> {
+  const { data } = await api.post<CreatedApiToken>('/api/api-tokens', input);
+  return data;
+}
+
+export async function deleteApiToken(id: string): Promise<void> {
+  await api.delete(`/api/api-tokens/${id}`);
+}
+
+// ───── Dashboard ─────
+
+export interface NodeHostMetrics {
+  cpu: {
+    usagePercent: number;
+    loadAvg1: number;
+    loadAvg5: number;
+    loadAvg15: number;
+    cores: number;
+  };
+  memory: {
+    totalBytes: number;
+    availableBytes: number;
+    usedBytes: number;
+    usedPercent: number;
+  };
+  disk: {
+    path: string;
+    totalBytes: number;
+    usedBytes: number;
+    usedPercent: number;
+  };
+  uptimeSeconds: number;
+  collectedAt: string;
+}
+
+export interface DashboardOverview {
+  users: {
+    total: number;
+    byStatus: Record<string, number>;
+    onlineNow: number;
+    onlineToday: number;
+    onlineThisWeek: number;
+    neverOnline: number;
+  };
+  traffic: {
+    todayBytes: number;
+    yesterdayBytes: number;
+    last7dBytes: number;
+    last30dBytes: number;
+    calendarMonthBytes: number;
+    currentYearBytes: number;
+    last24hHourly: { hour: string; bytes: number }[];
+  };
+  system: {
+    onlineNodeCount: number;
+    totalNodeCount: number;
+  };
+  host: {
+    cpu: {
+      loadPercent: number | null;
+      samplePercent: number;
+      cores: number;
+      loadavg: [number, number, number];
+    };
+    memory: { totalBytes: number; usedBytes: number; usedPercent: number };
+    disk: {
+      totalBytes: number;
+      usedBytes: number;
+      usedPercent: number;
+      path: string;
+    } | null;
+    process: {
+      rssBytes: number;
+      heapUsedBytes: number;
+      heapTotalBytes: number;
+      uptimeSeconds: number;
+    };
+  };
+  nodes: {
+    id: string;
+    name: string;
+    address: string;
+    protocol: string;
+    status: string;
+    countryCode: string | null;
+    lastStatusChange: string | null;
+    inboundCount: number;
+    todayBytes: number;
+    metrics: NodeHostMetrics | null;
+  }[];
+  byProtocol: {
+    protocol: string;
+    inboundCount: number;
+    enabledUserCount: number;
+  }[];
+  topUsersToday: { id: string; username: string; bytes: number }[];
+  recentEvents: {
+    id: string;
+    eventType: string;
+    userId: string;
+    username: string | null;
+    createdAt: string;
+  }[];
+}
+
+export async function getDashboardOverview(): Promise<DashboardOverview> {
+  const { data } = await api.get<DashboardOverview>('/api/dashboard/overview');
+  return data;
+}
+
+// ───── Settings ─────
+
+export interface PublicSettings {
+  brandName?: string;
+}
+
+/** Full settings dump (admin-only). Includes subscription metadata
+ *  (slice S1 — Profile-Title / Update-Interval / Support-URL / Announce). */
+export interface AdminSettings extends PublicSettings {
+  subscriptionProfileTitle?: string | null;
+  subscriptionUpdateIntervalHours?: number;
+  subscriptionSupportUrl?: string | null;
+  subscriptionAnnounceTemplate?: string | null;
+}
+
+export interface UpdateSettingsInput {
+  brandName?: string;
+  subscriptionProfileTitle?: string | null;
+  subscriptionUpdateIntervalHours?: number;
+  subscriptionSupportUrl?: string | null;
+  subscriptionAnnounceTemplate?: string | null;
+}
+
+/** Fetch public-flagged settings — no auth required. Used by LoginPage so
+ *  the brand title shows correctly before sign-in. */
+export async function getPublicSettings(): Promise<PublicSettings> {
+  const { data } = await api.get<PublicSettings>('/api/settings/public');
+  return data;
+}
+
+/** Admin-only — full settings dump. */
+export async function getSettings(): Promise<AdminSettings> {
+  const { data } = await api.get<AdminSettings>('/api/settings');
+  return data;
+}
+
+export async function updateSettings(
+  input: UpdateSettingsInput,
+): Promise<{ ok: boolean; updated: string[] }> {
+  const { data } = await api.put<{ ok: boolean; updated: string[] }>(
+    '/api/settings',
+    input,
+  );
+  return data;
+}

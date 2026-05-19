@@ -1,0 +1,144 @@
+# Iceslab
+
+[English](./README.md) · Русский
+
+Self-hosted панель для прокси, которая запускает настоящий апстрим-бинарник каждого протокола вместо того чтобы оборачивать всё через Xray-core. Hysteria 2, Xray (VLESS + REALITY + Vision), AmneziaWG kernel module, NaiveProxy (Caddy fork), Shadowsocks 2022, MTProto, Mieru — каждый это реальный бинарь проекта, под управлением Go node-agent через общий интерфейс `CoreAdapter`.
+
+## Установка
+
+Ubuntu 22.04+ или Debian 12+, root, идемпотентно.
+
+### Панель
+
+Заведи A-запись на VPS (`panel.example.com`, DNS only / серое облако в Cloudflare). После пропагации:
+
+```bash
+sudo -i
+PANEL_DOMAIN=panel.example.com \
+  bash <(curl -fsSL https://raw.githubusercontent.com/icecompany-tech/iceslab/main/scripts/install-iceslab.sh)
+```
+
+Ставит Docker, билдит образы, поднимает Postgres + Redis + backend + frontend, ставит Caddy с auto-TLS, лочит ufw на 22/80/443. Первый запуск 5-10 минут.
+
+Для быстрых локальных тестов без TLS:
+
+```bash
+sudo -i
+bash <(curl -fsSL https://raw.githubusercontent.com/icecompany-tech/iceslab/main/scripts/install-iceslab.sh)
+```
+
+SPA на `http://<vps-ip>:8080`. JWT летят открытым текстом, в продакшен так не выпускать.
+
+### Нода
+
+В панели: Nodes → Create node → имя + адрес → submit. Модалка покажет одноразовую bootstrap-команду с 15-минутным токеном. Запусти её на VPS ноды с флагами протокола ниже.
+
+#### Xray
+
+REALITY использует SNI-spoofing, домен не нужен. Сначала создай inbound в панели (Inbounds → Create, Generate для keypair), потом на ноде:
+
+```bash
+sudo -i
+bash <(curl -fsSL https://raw.githubusercontent.com/icecompany-tech/iceslab/main/scripts/install-iceslab-node.sh) \
+  --panel-url https://panel.example.com \
+  --bootstrap bs_xxx \
+  --protocol xray \
+  --xray-reality-private-key sI_p9bg-7cy... \
+  --xray-reality-short-ids   abc123 \
+  --xray-reality-server-names www.cloudflare.com \
+  --xray-reality-dest        www.cloudflare.com:443
+```
+
+#### Hysteria 2
+
+A-запись `hy2-01.example.com` → IP VPS (DNS only; UDP/443 через Cloudflare всё равно не пройдёт).
+
+```bash
+sudo -i
+bash <(curl -fsSL https://raw.githubusercontent.com/icecompany-tech/iceslab/main/scripts/install-iceslab-node.sh) \
+  --panel-url https://panel.example.com \
+  --bootstrap bs_xxx \
+  --protocol hysteria \
+  --hysteria-domain hy2-01.example.com \
+  --hysteria-email admin@example.com
+```
+
+Скрипт пишет `/etc/hysteria/config.yaml`, кладёт systemd-юнит, и при первом запуске Hysteria получит LE-сертификат через HTTP-01.
+
+#### AmneziaWG
+
+```bash
+bash <(curl -fsSL .../install-iceslab-node.sh) --panel-url ... --bootstrap ... --protocol amneziawg
+```
+
+Ставит amnezia-vpn DKMS kernel-модуль + `awg` / `awg-quick`. Открывает UDP 443 и 1234 в ufw, флипает `DEFAULT_FORWARD_POLICY=ACCEPT`, включает `ip_forward`.
+
+Пара вещей которые ловят людей врасплох:
+
+- Default подсеть `10.66.66.0/24`. Очевидная `10.0.0.0/24` коллизит с внутренним gateway у некоторых провайдеров (особенно Aeza).
+- Порт меньше 9999. RU мобильные ISP DPI-дропают исходящий UDP/443, а 51820 это default WireGuard который таргетят специально. 1234 или 51280 нормально.
+- Клиент: AmneziaVPN ≥ 4.8.12.9 или Hiddify Next ≥ 2.4. Есть upstream-баг ([amnezia-client#2582](https://github.com/amnezia-vpn/amnezia-client/issues/2582)) когда ненулевые S3/S4 молча дропают трафик — пресеты по умолчанию `S3=0 S4=0`.
+
+#### NaiveProxy / Shadowsocks 2022 / MTProto / Mieru
+
+```bash
+bash <(curl -fsSL .../install-iceslab-node.sh) --panel-url ... --bootstrap ... --protocol naive
+bash <(curl -fsSL .../install-iceslab-node.sh) --panel-url ... --bootstrap ... --protocol shadowsocks
+bash <(curl -fsSL .../install-iceslab-node.sh) --panel-url ... --bootstrap ... --protocol mtproto
+bash <(curl -fsSL .../install-iceslab-node.sh) --panel-url ... --bootstrap ... --protocol mieru
+```
+
+Bootstrap ставит апстрим-бинарь: xcaddy fork для Naive (нужно 2 GB RAM), xray-core для SS2022, `9seconds/mtg` для MTProto, `enfein/mieru` для Mieru.
+
+Эти протоколы не принимают флагов домена или cert при установке. Стартуют idle и ждут пока панель пушнёт inbound config через `applyInbounds`. Domain, email, masquerade и прочие protocol-specific поля живут в panel-side Profile (задаётся в UI один раз) и потом распространяются на все ноды куда профиль задеплоен. Naive требует A-запись (`hostname` в профиле); MTProto выбирает masquerade-домен там же; SS2022 и Mieru не требуют публичного домена.
+
+Про `node.address`: это mTLS-эндпоинт, через который панель ходит на агента (порт 8443 по умолчанию). Для routed-style ядер (Hysteria, Naive, MTProto) это тот же FQDN на котором клиенты будут стучаться в :443; для IP-style (Xray REALITY, AmneziaWG) — голый IP. Задавай правильно при создании ноды, потому что менять потом — только через Refresh bootstrap (key-иконка в строке ноды) с перевыпуском cert под новый SAN.
+
+## Протоколы
+
+| Протокол | Что запускается на ноде | Native или Xray |
+|---|---|---|
+| Hysteria 2 | `hysteria server` из apernet/hysteria, с auth-callback, Brutal CC, Salamander obfs, port-hopping | native |
+| Xray | `xray run` с VLESS + REALITY + Vision; транспорты raw / xhttp / ws / gRPC / httpupgrade / kcp; Trojan поверх REALITY | native |
+| AmneziaWG | amnezia-vpn DKMS kernel-модуль + `awg-quick` | native |
+| NaiveProxy | Caddy fork (`klzgrad/forwardproxy@naive` через xcaddy) | native |
+| Shadowsocks 2022 | xray-core inbound с `2022-blake3-*` шифрами | reuses xray binary |
+| MTProto | `9seconds/mtg` Fake-TLS, per-inbound secret из (id, domain) | native |
+| Mieru | `enfein/mieru` (`mita apply config` + reload) | native |
+
+## Стек
+
+| Слой | Инструменты |
+|---|---|
+| Panel API | TypeScript, Fastify 5, Prisma 7, PostgreSQL 16, Zod, Pino |
+| Background jobs | Redis 7, BullMQ |
+| Auth | JWT (jose), bcrypt, `@fastify/rate-limit` |
+| Inter-service | REST поверх mTLS через `@peculiar/x509`, undici |
+| Frontend | React 19, Vite 8, Mantine 8, TanStack Query 5, Zustand 5 |
+| Node-agent | Go 1.22+, нативный `crypto/tls`, `slog` |
+| Tests | Vitest (panel), Go testing (node) |
+| Infra | Docker, Docker Compose |
+
+## Разработка
+
+Node 22+, pnpm 10+, Go 1.22+, Docker. Тестировалось на Ubuntu (WSL).
+
+```bash
+pnpm install
+docker compose up -d postgres redis postgres-test
+pnpm --filter @iceslab/panel-backend exec prisma migrate dev
+pnpm --filter @iceslab/panel-backend dev     # backend на :3000
+pnpm --filter @iceslab/panel-frontend dev    # SPA на :5173
+```
+
+Создай первого администратора через форму «Create first admin» в SPA.
+
+```bash
+pnpm --filter @iceslab/panel-backend test    # backend (нужен postgres-test на :5433)
+cd apps/node && go test ./...                # node-agent
+pnpm --filter @iceslab/panel-frontend exec tsc --noEmit
+```
+
+## Лицензия
+
+Copyright (C) 2026 Icecompany. Распространяется под [AGPL-3.0-or-later](./LICENSE). Если запускаешь модифицированный Iceslab как сервис, обязан предоставить исходники своим пользователям.

@@ -1,0 +1,36 @@
+# Repo-root .dockerignore for monorepo builds.
+# Each app Dockerfile uses the repo root as build context, so this filters
+# noise from every build (regardless of which app is being built).
+
+# Per-package build artefacts and dep trees
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+**/coverage
+
+# Generated Prisma client (regenerated inside the builder)
+apps/panel-backend/src/generated
+
+# Go build artefacts
+apps/node/iceslab-node
+apps/node/iceslab-node-*
+apps/node/iceslab-node.exe
+
+# Local env / secrets / logs
+.env
+.env.local
+**/.env
+**/.env.local
+*.log
+
+# Editor / OS noise
+.git
+.gitignore
+.idea
+.vscode
+.DS_Store
+
+# Docs and CI files (not needed in images)
+docs
+*.md
+!README.md

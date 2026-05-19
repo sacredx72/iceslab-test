@@ -1,0 +1,41 @@
+# Force LF line endings for files that MUST run on Linux (shell scripts,
+# Dockerfiles, systemd units, etc). Windows autocrlf would otherwise convert
+# them to CRLF on checkout and they'd fail to execute on the VPS with
+# `/bin/bash^M: bad interpreter`.
+
+*.sh        text eol=lf
+*.bash      text eol=lf
+Dockerfile  text eol=lf
+*.Dockerfile text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.toml      text eol=lf
+Makefile    text eol=lf
+
+# Source code — let git auto-detect, but normalize on commit.
+*.ts        text
+*.tsx       text
+*.js        text
+*.jsx       text
+*.go        text eol=lf
+*.json      text
+*.md        text
+*.css       text
+*.html      text
+*.sql       text
+
+# Binary — never touch line endings.
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.svg       text
+*.woff      binary
+*.woff2     binary
+*.ttf       binary
+*.otf       binary
+*.pdf       binary
+*.zip       binary
+*.tar       binary
+*.gz        binary

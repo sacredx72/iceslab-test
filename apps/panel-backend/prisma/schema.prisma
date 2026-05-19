@@ -1,0 +1,634 @@
+// Iceslab panel-backend Prisma schema.
+// Datasource URL is injected from $DATABASE_URL via prisma.config.ts.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model AdminUser {
+  id           String    @id @default(uuid()) @db.Uuid
+  username     String    @unique @db.VarChar(64)
+  passwordHash String    @map("password_hash") @db.VarChar(128)
+  role         String    @default("admin") @db.VarChar(32)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt    DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  performedEvents SubscriptionEvent[]
+  apiTokens       ApiToken[]
+
+  @@map("admin_users")
+}
+
+model ApiToken {
+  id                String    @id @default(uuid()) @db.Uuid
+  name              String    @db.VarChar(64)
+  tokenHash         String    @unique @map("token_hash") @db.VarChar(255)
+  scopes            Json      @default("[]")
+  lastUsedAt        DateTime? @map("last_used_at") @db.Timestamptz(6)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  // Issuing admin — populated for tokens minted from /api/api-tokens since
+  // the FK was added. Nullable so legacy rows backfill cleanly; tryApiToken
+  // leaves request.admin undefined for those, which means /me 401s but the
+  // token still authorises the request itself.
+  createdByAdminId  String?   @map("created_by_admin_id") @db.Uuid
+  createdByAdmin    AdminUser? @relation(fields: [createdByAdminId], references: [id], onDelete: SetNull)
+
+  @@index([createdByAdminId], map: "api_tokens_created_by_admin_id_idx")
+  @@map("api_tokens")
+}
+
+// Singleton holding the panel's self-signed CA used to issue per-node mTLS
+// certificates. Always exactly one row (id = 1) — bootstrap on first start.
+model KeygenCa {
+  id            Int      @id @default(1)
+  certPem       String   @map("cert_pem")
+  privateKeyPem String   @map("private_key_pem")
+  // Slice S6 — separate panel-client cert (clientAuth-only, signed by CA).
+  // Used to be: panel presented the CA itself as its TLS leaf, which
+  // collapsed any compromised node into root-equivalent on the rest of
+  // the fleet. Now the CA private key never participates in a handshake.
+  // Nullable for one release so existing rows backfill on first call;
+  // bootstrapCa() generates them lazily.
+  panelClientCertPem    String? @map("panel_client_cert_pem")
+  panelClientKeyPem     String? @map("panel_client_key_pem")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("keygen_ca")
+}
+
+// ───── Slice 27: Profiles + Node Bindings ─────────────────────────────────
+//
+// New model that replaces the per-node `Inbound` row. Inspired by Remnawave's
+// ConfigProfile + Host split, simplified for our 7-protocol topology:
+//
+//   Profile               — a logical inbound TEMPLATE with shared config
+//                           (e.g. one VLESS+REALITY profile reused on N nodes)
+//   ProfileNodeBinding    — m:n: which profile is deployed to which node, +
+//                           per-node overrides (port, publicHost, ACME domain,
+//                           server PSK, AmneziaWG private key, ...)
+//   GroupProfile          — squad ACL at the profile level (replaces
+//                           GroupInbound / group_inbounds)
+//
+// During the migration window both old (`inbounds`, `group_inbounds`) and new
+// tables coexist. Final cleanup migration drops the old ones once all callers
+// are switched over.
+
+model Profile {
+  id          String   @id @default(uuid()) @db.Uuid
+  // Globally unique within the panel. Becomes the user-facing label of the
+  // logical inbound (replaces the per-node Inbound.name when N nodes share
+  // the same template).
+  name        String   @unique @db.VarChar(64)
+  protocol    String   @db.VarChar(32)
+  description String?
+  // Shared protocol config (for VLESS+REALITY: sni, publicKey, shortId,
+  // flow, fingerprint, network; for Hysteria2: obfs, brutal CC, etc.).
+  // Per-node fields live on ProfileNodeBinding.overrides.
+  config      Json
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  bindings       ProfileNodeBinding[]
+  groupProfiles  GroupProfile[]
+  amneziawgPeers AmneziawgPeer[]
+
+  @@index([protocol])
+  @@map("profiles")
+}
+
+model ProfileNodeBinding {
+  id         String   @id @default(uuid()) @db.Uuid
+  profileId  String   @map("profile_id") @db.Uuid
+  nodeId     String   @map("node_id") @db.Uuid
+  // Listening port on this node. Different bindings of the same profile
+  // can use different ports (e.g. node A on 443, node B on 8443).
+  port       Int
+  // Optional override of the public host emitted in subscription URIs.
+  // NULL → fall back to node.address (legacy behaviour).
+  publicHost String?  @map("public_host") @db.VarChar(253)
+  publicPort Int?     @map("public_port")
+  // Per-binding override of the protocol config. Merged shallowly over
+  // Profile.config when assembling the deployable inbound for this node.
+  // Used for fields that MUST differ per node: ACME domain, AmneziaWG
+  // server private key, Shadowsocks server PSK, MTProto derived secret, etc.
+  overrides  Json?
+  enabled    Boolean  @default(true)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  node    Node    @relation(fields: [nodeId], references: [id], onDelete: Restrict)
+  hosts   Host[]
+
+  // Same port can't be reused on the same node (different protocols would
+  // collide on the underlying socket).
+  @@unique([nodeId, port])
+  @@unique([profileId, nodeId])
+  @@index([profileId])
+  @@index([nodeId])
+  @@map("profile_node_bindings")
+}
+
+// ───── Slice 30: Hosts abstraction ───────────────────────────────────────
+//
+// One Binding can fan out into N Hosts in the subscription. Each Host is a
+// distinct URL the client sees with its own SNI/path/fingerprint/host-header
+// override on top of the binding+profile config. Use cases:
+//
+//   - REALITY direct + REALITY behind CDN as two URLs of one inbound
+//   - Multi-SNI fronting (apple.com / microsoft.com / cloudflare.com)
+//   - uTLS fingerprint A/B (chrome / firefox / random) of the same binding
+//   - Per-format URL gating (some host shapes only emit in singbox, not clash)
+//
+// At binding creation a single Host with `priority: 0` is auto-inserted so
+// the subscription stays back-compat (one binding still emits one URL until
+// the admin actually adds extra hosts).
+//
+// Inspired by Remnawave's hosts table; field set tightened to the overrides
+// our URI builders / format formatters actually consume.
+model Host {
+  id                String   @id @default(uuid()) @db.Uuid
+  bindingId         String   @map("binding_id") @db.Uuid
+
+  // Human label shown next to the URL in the admin UI ("Direct", "EU-CDN",
+  // "Mobile-tuned"). Not surfaced in the subscription — purely admin-side.
+  remark            String   @default("Default") @db.VarChar(64)
+  // Subscription emission order. Lowest first. Drag-and-drop UI mutates this.
+  priority          Int      @default(0)
+  enabled           Boolean  @default(true)
+
+  // Public address the client connects to. NULL → fall back to
+  // binding.publicHost → node.address. Use this when the host is fronted
+  // by a CDN whose endpoint differs from the origin.
+  addressOverride   String?  @map("address_override") @db.VarChar(253)
+  portOverride      Int?     @map("port_override")
+
+  // TLS / transport overrides. Each NULL → keep the value derived from
+  // profile.config + binding.overrides. Setting one only on a host lets the
+  // same inbound be reached with multiple SNI / fingerprint / path tuples.
+  sniOverride       String?  @map("sni_override") @db.VarChar(253)
+  hostHeaderOverride String? @map("host_header_override") @db.VarChar(253)
+  pathOverride      String?  @map("path_override") @db.VarChar(253)
+  fingerprintOverride String? @map("fingerprint_override") @db.VarChar(32)
+
+  // ALPN list emitted into client URI / config. Empty = adapter default.
+  alpn              String[] @default([])
+  // Skip cert verification on the client side (?allowInsecure=1). Useful for
+  // self-signed CDN front. Default off — admin opts in per host.
+  allowInsecure     Boolean  @default(false) @map("allow_insecure")
+  // Forces client-side security layer. `default` = use protocol default
+  // (REALITY for xray, TLS for naive, etc). `tls` / `none` are explicit
+  // overrides — only used when fronting REALITY through a CDN that
+  // terminates TLS itself.
+  securityLayer     String   @default("default") @map("security_layer") @db.VarChar(16)
+
+  // Subscription formats this host should be excluded from. e.g. some
+  // CDN-fronted shapes only work in singbox, not in clash. Stored as a
+  // canonical lowercase format name array: ["plain","clash","singbox","xrayjson","wgconf"].
+  disableForFormats String[] @default([]) @map("disable_for_formats")
+
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  binding ProfileNodeBinding @relation(fields: [bindingId], references: [id], onDelete: Cascade)
+
+  @@index([bindingId, priority])
+  @@map("hosts")
+}
+
+model GroupProfile {
+  groupId   String   @map("group_id") @db.Uuid
+  profileId String   @map("profile_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  group   Group   @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@id([groupId, profileId])
+  @@index([profileId])
+  @@map("group_profiles")
+}
+
+// ────────────────────────────────────────────────────────────────────────
+
+model Node {
+  id                    String    @id @default(uuid()) @db.Uuid
+  // `name` and `address` are unique only among ACTIVE rows — see the
+  // partial unique indexes `nodes_name_active_key` / `nodes_address_active_key`
+  // applied via raw migration. Without that, soft-deleted rows would block
+  // re-using the same name/address. App-level checks in nodes.service.ts
+  // mirror the partial index semantics; createNode also catches P2002 from
+  // the DB layer as a defense-in-depth.
+  name                  String    @db.VarChar(64)
+  address               String    @db.VarChar(255)
+  protocol              String    @default("xray") @db.VarChar(32)
+  publicKey             Bytes?    @map("public_key")
+  countryCode           String?   @map("country_code") @db.Char(2)
+  status                String    @default("unknown") @db.VarChar(16)
+  lastStatusChange      DateTime? @map("last_status_change") @db.Timestamptz(6)
+  lastStatusMessage     String?   @map("last_status_message")
+  consumptionMultiplier BigInt    @default(1) @map("consumption_multiplier")
+
+  // Slice 27.5 — region grouping + capacity hint. Both NULL by default
+  // so existing nodes need no backfill; UI shows them under "Без региона"
+  // and skips the utilization bar.
+  regionId              String?   @map("region_id") @db.Uuid
+  maxUsers              Int?      @map("max_users")
+
+  // Slice 38 — heartbeat self-destruct. Random 32-byte secret, generated
+  // at node creation. The bootstrap payload bundles a stateless HMAC token
+  // (nodeId + sig over heartbeatSecret) that the agent presents on every
+  // heartbeat poll. Server-side verification looks the secret up here and
+  // checks `deletedAt`. Backfill: existing rows get a freshly-generated
+  // secret in the migration so they keep working post-rollout.
+  heartbeatSecret       Bytes     @map("heartbeat_secret")
+
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt             DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  inbounds Inbound[]
+  profileBindings  ProfileNodeBinding[]
+  connectedUsers  UserTraffic[]
+  userUsageHistory NodeUserUsageHistory[]
+  usageHistory     NodeUsageHistory[]
+  bootstrapTokens NodeBootstrapToken[]
+  region          Region?  @relation(fields: [regionId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([deletedAt])
+  @@index([regionId])
+  @@map("nodes")
+}
+
+// Slice 27.5 — logical grouping of nodes ("EU-West", "RU", "Asia").
+// Plain identity table; smart server-side selection (slice 28) will
+// score nodes by `region.code` against the user's GeoIP lookup.
+model Region {
+  id        String   @id @default(uuid()) @db.Uuid
+  // Free-text label shown in the admin UI ("Europe", "RU TSPU-zone").
+  name      String   @unique @db.VarChar(64)
+  // ISO 3166-2-ish short code for matching ("EU", "RU", "AS"). Free-form
+  // for now — slice 28 may tighten validation when GeoIP integration lands.
+  code      String   @unique @db.VarChar(16)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  nodes Node[]
+
+  @@map("regions")
+}
+
+model Inbound {
+  id        String   @id @default(uuid()) @db.Uuid
+  nodeId    String   @map("node_id") @db.Uuid
+  protocol  String   @db.VarChar(32)
+  name      String   @db.VarChar(64)
+  port      Int
+  config    Json
+  enabled   Boolean  @default(true)
+  // publicHost / publicPort — slice 25. Until now the panel emitted client
+  // URIs using `hostFromAddress(node.address)` and `inbound.port` directly,
+  // which forced admins to overload `node.address` (the mTLS control-plane
+  // endpoint) with a public-facing FQDN. That broke the panel→node mTLS
+  // cert SAN every time the address changed and required a Refresh-bootstrap
+  // dance. With these two columns the public client-URL host can diverge
+  // from the control-plane endpoint. NULL → keep the historic behaviour
+  // (fallback to node.address).
+  publicHost String? @map("public_host") @db.VarChar(253)
+  publicPort Int?    @map("public_port")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  node Node @relation(fields: [nodeId], references: [id], onDelete: Restrict)
+  groupInbounds GroupInbound[]
+
+  @@unique([nodeId, port])
+  @@index([nodeId])
+  @@index([protocol])
+  @@map("inbounds")
+}
+
+model Group {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @unique @db.VarChar(64)
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  groupInbounds GroupInbound[]
+  groupProfiles GroupProfile[]
+  members       GroupMember[]
+
+  @@map("groups")
+}
+
+model GroupInbound {
+  groupId   String   @map("group_id") @db.Uuid
+  inboundId String   @map("inbound_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  group   Group   @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  inbound Inbound @relation(fields: [inboundId], references: [id], onDelete: Cascade)
+
+  @@id([groupId, inboundId])
+  @@index([inboundId])
+  @@map("group_inbounds")
+}
+
+model User {
+  id       String @id @default(uuid()) @db.Uuid
+  shortId  String @unique @map("short_id") @db.VarChar(16)
+  username String @db.VarChar(64)
+  status   String @default("active") @db.VarChar(16)
+
+  // Subscription window
+  expireAt DateTime? @map("expire_at") @db.Timestamptz(6)
+
+  // Traffic
+  trafficLimitBytes    BigInt? @map("traffic_limit_bytes")
+  trafficLimitStrategy String  @default("no_reset") @map("traffic_limit_strategy") @db.VarChar(16)
+
+  // Subscription URL
+  subscriptionToken String    @unique @map("subscription_token") @db.VarChar(64)
+  subRevokedAt      DateTime? @map("sub_revoked_at") @db.Timestamptz(6)
+
+  // Pre-generated credentials for all protocols
+  hysteriaPassword    String @map("hysteria_password") @db.VarChar(64)
+  amneziawgPrivateKey String @map("amneziawg_private_key") @db.VarChar(64)
+  amneziawgPublicKey  String @map("amneziawg_public_key") @db.VarChar(64)
+  naivePassword       String @map("naive_password") @db.VarChar(64)
+  xrayUuid            String @map("xray_uuid") @db.Uuid
+
+  // Per-user enabled protocols (subset of {hysteria, xray, amneziawg, naive}).
+  // Subscription generator filters endpoints by this; default keeps existing
+  // users on hysteria-only and admins explicitly opt in to others.
+  enabledProtocols Json @default("[\"hysteria\"]") @map("enabled_protocols")
+
+  // Limits
+  hwidDeviceLimit Int? @map("hwid_device_limit")
+
+  // Slice 27.5 — sticky-affinity hint for subscription generator.
+  // NULL = no preference (current behaviour). When set, the generator
+  // may bias the URL ordering toward this node so the client's url-test
+  // group settles on it first. Soft hint: not enforcement, the user's
+  // squad ACL still gates access to the node's profiles.
+  preferredNodeId String? @map("preferred_node_id") @db.Uuid
+
+  // Metadata (admin-facing)
+  description String?
+  tag         String? @db.VarChar(64)
+  telegramId  BigInt? @map("telegram_id")
+  email       String? @db.VarChar(255)
+
+  // Lifecycle
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  // Relations
+  traffic      UserTraffic?
+  groupMembers GroupMember[]
+  events               SubscriptionEvent[]
+  subscriptionRequests SubscriptionRequestHistory[]
+  nodeUsageHistory     NodeUserUsageHistory[]
+  amneziawgPeers       AmneziawgPeer[]
+  hwidDevices          HwidUserDevice[]
+
+  @@index([username])
+  @@index([status])
+  @@index([expireAt])
+  @@index([deletedAt])
+  @@index([telegramId])
+  @@index([email])
+  @@map("users")
+}
+
+model UserTraffic {
+  userId               String    @id @map("user_id") @db.Uuid
+  usedTrafficBytes     BigInt    @default(0) @map("used_traffic_bytes")
+  lifetimeTrafficBytes BigInt    @default(0) @map("lifetime_traffic_bytes")
+  onlineAt             DateTime? @map("online_at") @db.Timestamptz(6)
+  firstConnectedAt     DateTime? @map("first_connected_at") @db.Timestamptz(6)
+  lastConnectedNodeId  String?   @map("last_connected_node_id") @db.Uuid
+  lastTrafficResetAt   DateTime? @map("last_traffic_reset_at") @db.Timestamptz(6)
+
+  user              User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lastConnectedNode Node? @relation(fields: [lastConnectedNodeId], references: [id], onDelete: SetNull)
+
+  @@index([lastConnectedNodeId])
+  @@index([onlineAt])
+  @@map("user_traffic")
+}
+
+model GroupMember {
+  groupId   String   @map("group_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([groupId, userId])
+  @@index([userId])
+  @@map("group_members")
+}
+
+model SubscriptionEvent {
+  id                 BigInt    @id @default(autoincrement())
+  userId             String    @map("user_id") @db.Uuid
+  eventType          String    @map("event_type") @db.VarChar(32)
+  performedByAdminId String?   @map("performed_by_admin_id") @db.Uuid
+
+  // State snapshot (before/after)
+  trafficLimitBefore BigInt?   @map("traffic_limit_before")
+  trafficLimitAfter  BigInt?   @map("traffic_limit_after")
+  trafficUsedBefore  BigInt?   @map("traffic_used_before")
+  trafficUsedAfter   BigInt?   @map("traffic_used_after")
+  expireAtBefore     DateTime? @map("expire_at_before") @db.Timestamptz(6)
+  expireAtAfter      DateTime? @map("expire_at_after") @db.Timestamptz(6)
+  statusBefore       String?   @map("status_before") @db.VarChar(16)
+  statusAfter        String?   @map("status_after") @db.VarChar(16)
+
+  reason    String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user             User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  performedByAdmin AdminUser? @relation(fields: [performedByAdminId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([eventType])
+  @@map("subscription_events")
+}
+
+// One-time bootstrap token a node-installer redeems to fetch its mTLS
+// payload over HTTP at install time. Payload (cert + key + CA) is generated
+// on-redeem via keygen, NOT stored here — the token is just a short
+// identifier the node hands back, plus expiry/single-use machinery.
+//
+// Why this exists: the raw payload is ~6-7 KB base64. Linux TTY canonical
+// mode truncates pasted strings at 4096 bytes, so admins can't reliably
+// paste the whole payload through SSH. A short token (~22 chars) sails
+// through TTY without issue, then the node-side curl fetches the full
+// payload on a clean HTTP body without any TTY in between.
+model NodeBootstrapToken {
+  id         String    @id @default(uuid()) @db.Uuid
+  nodeId     String    @map("node_id") @db.Uuid
+  // URL-safe random, 22+ chars. Single-use; consumedAt set on redeem.
+  token      String    @unique @db.VarChar(64)
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(6)
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(6)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  node Node @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  @@index([nodeId])
+  @@index([expiresAt])
+  @@map("node_bootstrap_tokens")
+}
+
+// Subscription Response Rules — User-Agent → format auto-selection.
+// Slice 22 ships this for /sub/:token: when the client doesn't pass
+// `?format=` we walk the rules in `priority ASC` order and serve the
+// first whose `uaPattern` regex matches `User-Agent`. Default catch-all
+// rule (highest priority value) maps unknown UAs to `plain`.
+model SubscriptionResponseRule {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @unique @db.VarChar(64)
+  // Regex applied against the full User-Agent header. Match is case-
+  // sensitive — patterns include their own (?i) when needed. Length is
+  // bounded by the route handler before regex execution to defang ReDoS.
+  uaPattern String   @map("ua_pattern")
+  // Must match the FormatEnum in subscription.routes.ts.
+  format    String   @db.VarChar(16)
+  // Lower priority = evaluated first. Drag-and-drop UI mutates this.
+  priority  Int      @default(100)
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([priority])
+  @@map("subscription_response_rules")
+}
+
+// Per-user IP allocation for AmneziaWG inbounds. One row per (inboundId, userId);
+// allocator picks the first free IP from the inbound's subnet (default 10.0.0.0/24).
+// Persisted so the same user keeps a stable IP across restarts and so we can detect
+// IP exhaustion before mutating the awg config.
+model AmneziawgPeer {
+  id        String   @id @default(uuid()) @db.Uuid
+  // Slice 27 — was `inboundId` pointing at `inbounds`. After profiles
+  // refactor, peer allocations are scoped to the logical profile. Same user
+  // gets the same WG IP across every node a given profile is bound to
+  // (separate WG processes per node never see each other, so no collision).
+  profileId String   @map("profile_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  ip        String   @db.VarChar(45)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, ip])
+  @@unique([profileId, userId])
+  @@index([userId])
+  @@map("amneziawg_peers")
+}
+
+model SubscriptionRequestHistory {
+  id          BigInt   @id @default(autoincrement())
+  userId      String   @map("user_id") @db.Uuid
+  requestIp   String?  @map("request_ip") @db.VarChar(45)
+  userAgent   String?  @map("user_agent")
+  requestedAt DateTime @default(now()) @map("requested_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, requestedAt(sort: Desc)])
+  @@map("subscription_request_history")
+}
+
+model NodeUserUsageHistory {
+  nodeId   String   @map("node_id") @db.Uuid
+  userId   String   @map("user_id") @db.Uuid
+  date     DateTime @db.Date
+  bytesIn  BigInt   @default(0) @map("bytes_in")
+  bytesOut BigInt   @default(0) @map("bytes_out")
+
+  node Node @relation(fields: [nodeId], references: [id], onDelete: Restrict)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([nodeId, date, userId])
+  @@index([userId, date(sort: Desc)])
+  @@map("node_user_usage_history")
+}
+
+model NodeUsageHistory {
+  nodeId        String   @map("node_id") @db.Uuid
+  hour          DateTime @map("hour") @db.Timestamptz(6)
+  downloadBytes BigInt   @default(0) @map("download_bytes")
+  uploadBytes   BigInt   @default(0) @map("upload_bytes")
+
+  node Node @relation(fields: [nodeId], references: [id], onDelete: Restrict)
+
+  @@id([nodeId, hour])
+  @@index([nodeId, hour(sort: Desc)])
+  // Dashboard aggregates by `WHERE hour >= since` without nodeId — the
+  // composite indexes above are leftmost on nodeId and useless for that.
+  @@index([hour(sort: Desc)])
+  @@map("node_usage_history")
+}
+
+// ───── Slice S2: HWID enforcement ────────────────────────────────────────
+//
+// Tracks which physical client devices have fetched a user's subscription.
+// Each row is a (userId, hwid) pair, populated lazily — on /sub/:token the
+// middleware reads the `x-hwid` header (set by Hiddify/Streisand/Happ),
+// upserts this row, then counts how many devices the user has and 403s
+// if `count > user.hwidDeviceLimit`.
+//
+// Trust model: client-supplied HWID — this is a "concerned parent" gate,
+// not anti-cheat. Spoofing the header on the client trivially bypasses
+// it. Acceptable: the goal is preventing casual subscription sharing, not
+// hardening against adversarial users.
+model HwidUserDevice {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  hwid         String   @db.VarChar(255)
+  // First time we saw this device — for audit / "device added" UI later.
+  firstSeenAt  DateTime @default(now()) @map("first_seen_at") @db.Timestamptz(6)
+  // Updated on every /sub/:token hit so admins can see stale devices.
+  lastSeenAt   DateTime @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+  // Optional admin label ("Phone", "Laptop") — set via API later, NULL by default.
+  label        String?  @db.VarChar(64)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Same physical device hitting the same user's subscription is one row,
+  // not a fresh insert per request.
+  @@unique([userId, hwid])
+  @@index([userId])
+  @@map("hwid_user_devices")
+}
+
+/// Key-value store for panel-wide settings (brand name, logo, primary
+/// colour, ACL flags). Centralised so multiple admin browsers see the
+/// same state and unauthenticated pages (LoginPage) can read public keys.
+model AppSetting {
+  key       String   @id
+  value     Json
+  /// Read-without-auth flag. `true` = exposed via GET /api/settings/public,
+  /// safe for the login page to fetch before authenticating. `false` =
+  /// admin-only.
+  isPublic  Boolean  @default(false) @map("is_public")
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("app_settings")
+}

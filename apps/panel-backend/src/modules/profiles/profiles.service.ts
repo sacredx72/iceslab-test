@@ -1,0 +1,302 @@
+import { Prisma } from '../../generated/prisma/client.js';
+import { eventBus } from '../../lib/event-bus.js';
+import { prisma } from '../../prisma.js';
+import { ALL_SQUAD_ID } from '../squads/squads.constants.js';
+import {
+  PROTOCOL_CONFIG_SCHEMAS,
+} from '../inbounds/inbounds.schemas.js';
+import { ensureDefaultHost } from '../hosts/hosts.service.js';
+import {
+  generateSsServerPsk,
+} from './ss-helpers.js';
+import type {
+  CreateBindingInput,
+  CreateProfileInput,
+  UpdateBindingInput,
+  UpdateProfileInput,
+  ListBindingsQuery,
+  ListProfilesQuery,
+} from './profiles.schemas.js';
+import {
+  mapBinding,
+  mapProfile,
+  type PublicBindingDto,
+  type PublicProfileDto,
+} from './profiles.mapper.js';
+
+// ───── Errors ─────
+
+export class ProfileNotFoundError extends Error {
+  constructor(public id: string) {
+    super(`Profile ${id} not found`);
+    this.name = 'ProfileNotFoundError';
+  }
+}
+export class BindingNotFoundError extends Error {
+  constructor(public id: string) {
+    super(`Binding ${id} not found`);
+    this.name = 'BindingNotFoundError';
+  }
+}
+export class ProfileNameTakenError extends Error {
+  constructor(public name: string) {
+    super(`Profile name "${name}" already in use`);
+    this.name = 'ProfileNameTakenError';
+  }
+}
+export class PortInUseError extends Error {
+  constructor(public nodeId: string, public port: number) {
+    super(`Port ${port} already bound on node ${nodeId}`);
+    this.name = 'PortInUseError';
+  }
+}
+export class NodeAlreadyBoundError extends Error {
+  constructor(public profileId: string, public nodeId: string) {
+    super(`Node ${nodeId} is already bound to profile ${profileId}`);
+    this.name = 'NodeAlreadyBoundError';
+  }
+}
+export class NodeNotFoundError extends Error {
+  constructor(public id: string) {
+    super(`Node ${id} not found`);
+    this.name = 'NodeNotFoundError';
+  }
+}
+
+// ───── Profile CRUD ─────
+
+export async function createProfile(input: CreateProfileInput): Promise<PublicProfileDto> {
+  const existing = await prisma.profile.findUnique({ where: { name: input.name } });
+  if (existing) throw new ProfileNameTakenError(input.name);
+
+  // Slice 24d — auto-fill SS2022 server PSK if admin omitted it.
+  let configToStore: Record<string, unknown> = input.config as Record<string, unknown>;
+  if (input.protocol === 'shadowsocks') {
+    const ss = configToStore as { method: string; serverPsk?: string };
+    if (!ss.serverPsk) {
+      configToStore = { ...ss, serverPsk: generateSsServerPsk(ss.method) };
+    }
+  }
+
+  const created = await prisma.$transaction(async (tx) => {
+    const p = await tx.profile.create({
+      data: {
+        name: input.name,
+        protocol: input.protocol,
+        description: input.description ?? null,
+        config: configToStore as never,
+        enabled: input.enabled,
+      },
+    });
+    // Slice 26 invariant — every new profile auto-attaches to "All" squad.
+    await tx.groupProfile.upsert({
+      where: { groupId_profileId: { groupId: ALL_SQUAD_ID, profileId: p.id } },
+      create: { groupId: ALL_SQUAD_ID, profileId: p.id },
+      update: {},
+    });
+    return p;
+  });
+
+  eventBus.emit('profile.created', { profileId: created.id });
+  return mapProfile({ ...created, _count: { bindings: 0 } });
+}
+
+export async function listProfiles(q: ListProfilesQuery): Promise<PublicProfileDto[]> {
+  const profiles = await prisma.profile.findMany({
+    where: q.protocol ? { protocol: q.protocol } : undefined,
+    orderBy: [{ protocol: 'asc' }, { name: 'asc' }],
+    include: { _count: { select: { bindings: true } } },
+  });
+  return profiles.map(mapProfile);
+}
+
+export async function getProfileById(id: string): Promise<PublicProfileDto> {
+  const profile = await prisma.profile.findUnique({
+    where: { id },
+    include: { _count: { select: { bindings: true } } },
+  });
+  if (!profile) throw new ProfileNotFoundError(id);
+  return mapProfile(profile);
+}
+
+export async function updateProfile(
+  id: string,
+  input: UpdateProfileInput,
+): Promise<PublicProfileDto> {
+  const existing = await prisma.profile.findUnique({ where: { id } });
+  if (!existing) throw new ProfileNotFoundError(id);
+
+  if (input.name && input.name !== existing.name) {
+    const collision = await prisma.profile.findUnique({ where: { name: input.name } });
+    if (collision) throw new ProfileNameTakenError(input.name);
+  }
+
+  const data: Prisma.ProfileUpdateInput = {};
+  if (input.name !== undefined) data.name = input.name;
+  if (input.description !== undefined) data.description = input.description;
+  if (input.enabled !== undefined) data.enabled = input.enabled;
+
+  if (input.config !== undefined) {
+    const schema = PROTOCOL_CONFIG_SCHEMAS[
+      existing.protocol as keyof typeof PROTOCOL_CONFIG_SCHEMAS
+    ];
+    if (!schema) throw new Error(`Unknown protocol ${existing.protocol}`);
+    const parsed = schema.parse(input.config);
+    data.config = parsed as never;
+  }
+
+  const updated = await prisma.profile.update({
+    where: { id },
+    data,
+    include: { _count: { select: { bindings: true } } },
+  });
+  eventBus.emit('profile.updated', { profileId: id });
+  return mapProfile(updated);
+}
+
+export async function deleteProfile(id: string): Promise<void> {
+  const profile = await prisma.profile.findUnique({
+    where: { id },
+    include: { bindings: { select: { nodeId: true } } },
+  });
+  if (!profile) throw new ProfileNotFoundError(id);
+
+  const affectedNodeIds = profile.bindings.map((b) => b.nodeId);
+  await prisma.profile.delete({ where: { id } });
+
+  eventBus.emit('profile.deleted', { profileId: id, affectedNodeIds });
+}
+
+// ───── Bindings CRUD ─────
+
+export async function createBinding(input: CreateBindingInput): Promise<PublicBindingDto> {
+  const profile = await prisma.profile.findUnique({ where: { id: input.profileId } });
+  if (!profile) throw new ProfileNotFoundError(input.profileId);
+  const node = await prisma.node.findFirst({
+    where: { id: input.nodeId, deletedAt: null },
+  });
+  if (!node) throw new NodeNotFoundError(input.nodeId);
+
+  // Pre-flight uniqueness checks for friendlier error messages.
+  const portConflict = await prisma.profileNodeBinding.findUnique({
+    where: { nodeId_port: { nodeId: input.nodeId, port: input.port } },
+  });
+  if (portConflict) throw new PortInUseError(input.nodeId, input.port);
+  const dupBinding = await prisma.profileNodeBinding.findUnique({
+    where: {
+      profileId_nodeId: { profileId: input.profileId, nodeId: input.nodeId },
+    },
+  });
+  if (dupBinding) throw new NodeAlreadyBoundError(input.profileId, input.nodeId);
+
+  const created = await prisma.profileNodeBinding.create({
+    data: {
+      profileId: input.profileId,
+      nodeId: input.nodeId,
+      port: input.port,
+      publicHost: input.publicHost ?? null,
+      publicPort: input.publicPort ?? null,
+      overrides: (input.overrides as Prisma.InputJsonValue | undefined) ?? Prisma.JsonNull,
+      enabled: input.enabled,
+    },
+  });
+  // Slice 30 — every new binding ships with one Default host so the
+  // subscription generator (which iterates bindings × hosts) has something
+  // to emit. Admin can later add extras with different SNI / fingerprint.
+  await ensureDefaultHost(created.id);
+  eventBus.emit('binding.created', {
+    bindingId: created.id,
+    profileId: created.profileId,
+    nodeId: created.nodeId,
+  });
+  return mapBinding(created);
+}
+
+export async function listBindings(q: ListBindingsQuery): Promise<PublicBindingDto[]> {
+  // Skip bindings whose node was soft-deleted — otherwise DeployProfileModal
+  // / profile cards would carry phantom rows from removed nodes.
+  const where: Prisma.ProfileNodeBindingWhereInput = { node: { deletedAt: null } };
+  if (q.nodeId) where.nodeId = q.nodeId;
+  if (q.profileId) where.profileId = q.profileId;
+  const rows = await prisma.profileNodeBinding.findMany({
+    where,
+    orderBy: [{ nodeId: 'asc' }, { port: 'asc' }],
+  });
+  return rows.map(mapBinding);
+}
+
+export async function getBindingById(id: string): Promise<PublicBindingDto> {
+  const b = await prisma.profileNodeBinding.findUnique({ where: { id } });
+  if (!b) throw new BindingNotFoundError(id);
+  return mapBinding(b);
+}
+
+export async function updateBinding(
+  id: string,
+  input: UpdateBindingInput,
+): Promise<PublicBindingDto> {
+  const existing = await prisma.profileNodeBinding.findUnique({ where: { id } });
+  if (!existing) throw new BindingNotFoundError(id);
+
+  if (input.port !== undefined && input.port !== existing.port) {
+    const portConflict = await prisma.profileNodeBinding.findUnique({
+      where: { nodeId_port: { nodeId: existing.nodeId, port: input.port } },
+    });
+    if (portConflict && portConflict.id !== id) {
+      throw new PortInUseError(existing.nodeId, input.port);
+    }
+  }
+
+  const data: Prisma.ProfileNodeBindingUpdateInput = {};
+  if (input.port !== undefined) data.port = input.port;
+  if (input.publicHost !== undefined) data.publicHost = input.publicHost;
+  if (input.publicPort !== undefined) data.publicPort = input.publicPort;
+  if (input.enabled !== undefined) data.enabled = input.enabled;
+  if (input.overrides !== undefined) {
+    data.overrides =
+      input.overrides === null
+        ? Prisma.JsonNull
+        : (input.overrides as Prisma.InputJsonValue);
+  }
+
+  const updated = await prisma.profileNodeBinding.update({ where: { id }, data });
+  eventBus.emit('binding.updated', {
+    bindingId: id,
+    profileId: updated.profileId,
+    nodeId: updated.nodeId,
+  });
+  return mapBinding(updated);
+}
+
+export async function deleteBinding(id: string): Promise<void> {
+  const existing = await prisma.profileNodeBinding.findUnique({ where: { id } });
+  if (!existing) throw new BindingNotFoundError(id);
+  await prisma.profileNodeBinding.delete({ where: { id } });
+  eventBus.emit('binding.deleted', {
+    bindingId: id,
+    profileId: existing.profileId,
+    nodeId: existing.nodeId,
+  });
+}
+
+// ───── Resolution ─────
+
+/**
+ * Resolve the deployable inbound config for a (profile, node) pair: shallow
+ * merge of `profile.config` + `binding.overrides`. Used by the inbound-sync
+ * queue when shipping configs to node-agents and by the subscription
+ * generator when emitting client URIs.
+ *
+ * Shallow merge is intentional — overrides should mention specific top-level
+ * fields (`acmeDomain`, `serverPsk`, etc.). Deep merge would silently mask
+ * partial-array edits which is rarely what admins mean.
+ */
+export function resolveBindingConfig(
+  profileConfig: unknown,
+  overrides: unknown,
+): Record<string, unknown> {
+  const base = (profileConfig ?? {}) as Record<string, unknown>;
+  const ov = (overrides ?? {}) as Record<string, unknown>;
+  return { ...base, ...ov };
+}
+

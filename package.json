@@ -1,0 +1,22 @@
+{
+  "name": "iceslab",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Multi-core proxy panel with native Hysteria2, AmneziaWG, and NaiveProxy support",
+  "scripts": {
+    "dev": "pnpm -r --parallel dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test"
+  },
+  "engines": {
+    "node": ">=22",
+    "pnpm": ">=10"
+  },
+  "packageManager": "pnpm@10.33.2",
+  "pnpm": {
+    "overrides": {
+      "fast-uri": ">=3.1.2"
+    }
+  }
+}

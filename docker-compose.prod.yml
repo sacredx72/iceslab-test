@@ -1,0 +1,153 @@
+# Production compose for the Iceslab control-plane (panel + DB + Redis).
+# Node-agents live on remote VPS hosts and are NOT part of this file —
+# provision them per the install instructions in README.md.
+#
+# Usage:
+#   cp .env.production.example .env.production
+#   # edit values (set JWT_SECRET, POSTGRES_PASSWORD, etc.)
+#   docker compose -f docker-compose.prod.yml --env-file .env.production up -d
+#
+# First-time DB setup (and after any new migration):
+#   docker compose -f docker-compose.prod.yml --env-file .env.production \
+#     run --rm migrate
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: iceslab-prod-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_prod_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: iceslab-prod-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_prod_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # One-shot service: applies any pending Prisma migrations and exits.
+  # Run explicitly via `docker compose run --rm migrate` before starting
+  # the backend for the first time and after every deploy.
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/panel-backend/Dockerfile
+    image: iceslab-backend:latest
+    container_name: iceslab-prod-migrate
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["pnpm", "exec", "prisma", "migrate", "deploy"]
+    restart: "no"
+
+  backend:
+    build:
+      context: .
+      dockerfile: apps/panel-backend/Dockerfile
+    image: iceslab-backend:latest
+    container_name: iceslab-prod-backend
+    environment:
+      NODE_ENV: production
+      APP_HOST: 0.0.0.0
+      APP_PORT: "3000"
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-24h}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      CORS_ORIGIN: ${CORS_ORIGIN}
+      PUBLIC_URL: ${PUBLIC_URL}
+      HYSTERIA_PUBLIC_PORT: ${HYSTERIA_PUBLIC_PORT:-443}
+      # Slice S7 — security knobs. Without these the strict per-route
+      # rate limits, X-Forwarded-For trust hops, and node-install IP
+      # auto-injection don't reach the running container even when set
+      # in .env.production.
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-2}
+      PANEL_PUBLIC_IP: ${PANEL_PUBLIC_IP:-}
+      RATE_LIMIT_SUB_PER_MIN: ${RATE_LIMIT_SUB_PER_MIN:-30}
+      RATE_LIMIT_BOOTSTRAP_PER_MIN: ${RATE_LIMIT_BOOTSTRAP_PER_MIN:-10}
+      RATE_LIMIT_HEARTBEAT_PER_MIN: ${RATE_LIMIT_HEARTBEAT_PER_MIN:-120}
+      LOGIN_LOCKOUT_FAILURES: ${LOGIN_LOCKOUT_FAILURES:-5}
+      LOGIN_LOCKOUT_DURATION_MIN: ${LOGIN_LOCKOUT_DURATION_MIN:-15}
+      LOGIN_LOCKOUT_WINDOW_MIN: ${LOGIN_LOCKOUT_WINDOW_MIN:-15}
+      # ACME contact email auto-injected into Hysteria / Naive install
+      # commands. Optional — UI emits placeholder when unset.
+      ACME_DEFAULT_EMAIL: ${ACME_DEFAULT_EMAIL:-}
+      # Tier-1 security — Telegram alert webhook (cycle #6). Set both to
+      # enable login / lockout / node-event push notifications. Get a bot
+      # token from @BotFather; chat_id from @userinfobot.
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      # Tier-1 security — admin geo-block + honeypot. ADMIN_ALLOWED_COUNTRIES
+      # empty → geo-block disabled. Requires Cloudflare orange-cloud (CF-IPCountry).
+      ADMIN_ALLOWED_COUNTRIES: ${ADMIN_ALLOWED_COUNTRIES:-}
+      HONEYPOT_BLACKLIST_TTL_SEC: ${HONEYPOT_BLACKLIST_TTL_SEC:-3600}
+      # Tier-1 — honey-user tripwire tokens (CSV). Caught live during cycle #6
+      # reality-check 2026-05-12: was in config.ts schema + .env.production
+      # template + subscription.routes.ts check, but the passthrough line in
+      # this compose file was missing. Result: backend container had empty
+      # HONEY_USER_TOKENS env var → empty array → .includes() always false →
+      # honey-token requests fell through to the regular subscription handler
+      # and returned 404 instead of the plausible-empty 200 + IP blacklist.
+      HONEY_USER_TOKENS: ${HONEY_USER_TOKENS:-}
+      RATE_LIMIT_SUB_IP_PER_MIN: ${RATE_LIMIT_SUB_IP_PER_MIN:-120}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    expose:
+      - "3000"
+    restart: unless-stopped
+    healthcheck:
+      # Without this the frontend's `depends_on: backend` only waits for
+      # container-start, not /healthz — operators see "API offline" flashes
+      # on first boot. Backend's own /healthz is mounted at the root.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: apps/panel-frontend/Dockerfile
+      args:
+        # Empty → Vite issues same-origin requests, which the frontend's
+        # own nginx layer reverse-proxies to the backend service.
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
+    image: iceslab-frontend:latest
+    container_name: iceslab-prod-frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      # Front the panel with your own reverse proxy (Traefik / Caddy / nginx)
+      # to terminate TLS and bind to :443. Default exposes only :8080.
+      - "${FRONTEND_PORT:-8080}:80"
+    restart: unless-stopped
+
+volumes:
+  postgres_prod_data:
+  redis_prod_data:

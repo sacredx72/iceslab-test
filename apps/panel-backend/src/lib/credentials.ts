@@ -1,0 +1,82 @@
+import { randomBytes, randomUUID, generateKeyPairSync } from 'node:crypto';
+
+/**
+ * Random URL-safe string of approximately N*4/3 characters.
+ * Uses base64url (no '+', '/', or padding).
+ */
+function randomUrlSafe(byteLength: number): string {
+  return randomBytes(byteLength).toString('base64url');
+}
+
+/**
+ * Generate a raw Curve25519 (X25519) keypair as 32-byte buffers. Node exports
+ * X25519 keys in DER (PKCS8 for private, SPKI for public). The actual 32-byte
+ * key sits at the END of the DER blob — slice the last 32.
+ */
+function generateX25519Raw() {
+  const { publicKey, privateKey } = generateKeyPairSync('x25519');
+  const privDer = privateKey.export({ format: 'der', type: 'pkcs8' });
+  const pubDer = publicKey.export({ format: 'der', type: 'spki' });
+  return {
+    privateKey: privDer.subarray(privDer.length - 32),
+    publicKey: pubDer.subarray(pubDer.length - 32),
+  };
+}
+
+/**
+ * Curve25519 keypair as **standard base64** (with `+`/`/`, padded). Used by
+ * WireGuard / AmneziaWG — matches `wg genkey` output, kernel module accepts.
+ */
+export function generateWireguardKeyPair(): {
+  privateKey: string;
+  publicKey: string;
+} {
+  const { privateKey, publicKey } = generateX25519Raw();
+  return {
+    privateKey: privateKey.toString('base64'),
+    publicKey: publicKey.toString('base64'),
+  };
+}
+
+/**
+ * Curve25519 keypair as **base64url** (`-`/`_`, no padding). Used by Xray
+ * REALITY — `xray x25519` produces this form. The Xray config validator
+ * rejects standard base64 (caught on VPS during slice-23 test on 2026-05-06).
+ */
+export function generateRealityKeyPair(): {
+  privateKey: string;
+  publicKey: string;
+} {
+  const { privateKey, publicKey } = generateX25519Raw();
+  return {
+    privateKey: privateKey.toString('base64url'),
+    publicKey: publicKey.toString('base64url'),
+  };
+}
+
+/**
+ * All credentials/identifiers generated when creating a new user.
+ */
+export interface UserCredentials {
+  hysteriaPassword: string;
+  naivePassword: string;
+  xrayUuid: string;
+  amneziawgPrivateKey: string;
+  amneziawgPublicKey: string;
+  subscriptionToken: string;
+  shortId: string;
+}
+
+export function generateUserCredentials(): UserCredentials {
+  const wg = generateWireguardKeyPair();
+
+  return {
+    hysteriaPassword:    randomUrlSafe(24),  // ~32 chars
+    naivePassword:       randomUrlSafe(24),  // ~32 chars
+    xrayUuid:            randomUUID(),
+    amneziawgPrivateKey: wg.privateKey,
+    amneziawgPublicKey:  wg.publicKey,
+    subscriptionToken:   randomUrlSafe(32),  // ~43 chars
+    shortId:             randomUrlSafe(8),   // ~11 chars
+  };
+}

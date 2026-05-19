@@ -1,0 +1,38 @@
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: #08101A;
+  color: #C8D4E3;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Mantine surface overrides to match Iceslab palette */
+:root {
+  --mantine-color-body: #08101A;
+  --mantine-color-default: #0F1A28;
+  --mantine-color-default-hover: #152233;
+  --mantine-color-default-border: #1C2A3D;
+  --mantine-color-dimmed: #7A8BA3;
+}
+
+/* Hairline scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #1C2A3D;
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2C3A4E;
+}

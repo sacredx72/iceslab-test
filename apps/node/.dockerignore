@@ -1,0 +1,6 @@
+iceslab-node
+iceslab-node-*
+iceslab-node.exe
+*.log
+.DS_Store
+README.md
