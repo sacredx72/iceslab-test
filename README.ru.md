@@ -1,5 +1,9 @@
 # Iceslab
 
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](./LICENSE)
+[![Status: alpha](https://img.shields.io/badge/status-alpha-orange.svg)](#)
+[![GitHub stars](https://img.shields.io/github/stars/icecompany-tech/iceslab?style=social)](https://github.com/icecompany-tech/iceslab)
+
 [English](./README.md) · Русский
 
 Self-hosted панель для прокси, которая запускает настоящий апстрим-бинарник каждого протокола вместо того чтобы оборачивать всё через Xray-core. Hysteria 2, Xray (VLESS + REALITY + Vision), AmneziaWG kernel module, NaiveProxy (Caddy fork), Shadowsocks 2022, MTProto, Mieru — каждый это реальный бинарь проекта, под управлением Go node-agent через общий интерфейс `CoreAdapter`.

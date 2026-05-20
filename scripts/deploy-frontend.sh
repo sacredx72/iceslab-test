@@ -16,13 +16,23 @@
 
 set -euo pipefail
 
-NO_CACHE=1   # default ON
+LIB_PREFIX="deploy-fe"
+# shellcheck source=_lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
+trap 'on_err $LINENO' ERR
+
+# ───── Args ─────
+NO_CACHE=1
 for arg in "$@"; do
     case "$arg" in
         --no-cache|--fresh) NO_CACHE=1 ;;
         --cache)            NO_CACHE=0 ;;
+        -h|--help)
+            sed -n '2,15p' "$0" | sed 's/^# \?//'
+            exit 0
+            ;;
         *)
-            echo "[deploy-fe] unknown arg: $arg" >&2
+            log_err "unknown arg: $arg"
             exit 2
             ;;
     esac
@@ -30,25 +40,38 @@ done
 
 COMPOSE_FILE="docker-compose.prod.yml"
 ENV_FILE=".env.production"
-
-if [[ ! -f "$COMPOSE_FILE" || ! -f "$ENV_FILE" ]]; then
-    echo "[deploy-fe] run from panel project root (need $COMPOSE_FILE + $ENV_FILE)" >&2
-    exit 1
-fi
+require_compose_root
 
 DC=(docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE")
+STEP_TOTAL=3
 
-echo "[deploy-fe] git pull"
-git pull
+# ───── Step 1: git pull ─────
+SHA_BEFORE=$(git_short_sha)
+step 1 "git pull (was at ${SHA_BEFORE})"
+git pull --ff-only
+SHA_AFTER=$(git_short_sha)
+if [[ "$SHA_BEFORE" == "$SHA_AFTER" ]]; then
+    log_info "  no new commits — re-deploying ${SHA_AFTER}"
+else
+    log_info "  ${SHA_BEFORE} → ${SHA_AFTER}"
+fi
+step_done
 
+# ───── Step 2: rebuild frontend ─────
 if [[ $NO_CACHE -eq 1 ]]; then
-    echo "[deploy-fe] forced rebuild (no cache)"
+    step 2 "rebuild frontend (--no-cache)"
     "${DC[@]}" build --no-cache frontend
     "${DC[@]}" up -d frontend
 else
-    echo "[deploy-fe] rebuild + restart frontend"
+    step 2 "rebuild + restart frontend (cached)"
     "${DC[@]}" up -d --build frontend
 fi
+step_done
 
-echo "[deploy-fe] status"
+# ───── Step 3: status ─────
+step 3 "status"
 "${DC[@]}" ps frontend
+step_done
+
+echo
+log_ok "frontend deploy complete in $(elapsed_total) — now serving ${SHA_AFTER}"

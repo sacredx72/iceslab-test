@@ -235,7 +235,7 @@ export function UsersPage() {
     return s;
   }, [allUsers]);
 
-  // Reset page whenever filter or search narrows the set — sticking on page
+  // Reset page whenever filter or search narrows the set, sticking on page
   // 5 after filtering to 3 matches gives an empty table.
   useEffect(() => {
     setPage(1);
@@ -324,7 +324,10 @@ export function UsersPage() {
     <Stack gap="lg">
       <PageHero
         eyebrow={t('pageHero.usersEyebrow', {
-          total: stats.total,
+          // `count` drives i18next pluralization (one/few/many/other for RU,
+          // one/other for EN). Without it the eyebrow rendered "1 аккаунтов"
+          // on a single user — caught during the post-refactor audit.
+          count: stats.total,
           online: stats.active,
           limited:
             stats.limited > 0
