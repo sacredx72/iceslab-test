@@ -101,8 +101,12 @@ on_error() {
   # error message (tee captures stderr, we read the same file = feedback loop).
   if [[ -r /tmp/install-panel.log ]]; then
     printf '  Last 30 log lines (/tmp/install-panel.log):\n' >&2
-    tail -60 /tmp/install-panel.log \
-      | grep -v -E '^(✗ install-iceslab.*failed|  (Step|Where|Command|Exit|Step time|Total time|Last [0-9]+ log lines|  Re-run is idempotent|  install command again):|    )' \
+    # Strip lines that belong to a prior error-block (this very block, since
+    # `tee` captures stderr into the log we're reading). Match all known
+    # error-block patterns: the header, all field lines, the tail header,
+    # the trailing instructions, and the indented body lines (4 spaces).
+    tail -80 /tmp/install-panel.log \
+      | grep -v -E '^(\s*)?(✗ install-iceslab|  (Step|Where|Command|Exit|Step time|Total time):|  Last [0-9]+ log lines|  Re-run is idempotent|  install command again|    )' \
       | tail -30 \
       | sed "s/^/    /" >&2
     printf '\n' >&2
@@ -323,7 +327,11 @@ if [[ "${SKIP_FIREWALL:-0}" != "1" ]]; then
   ufw default deny incoming  >/dev/null
   ufw default allow outgoing >/dev/null
   ufw --force enable         >/dev/null
-  ok "allowed 22, 80, 443${PANEL_DOMAIN:+}${PANEL_DOMAIN:-, $FRONTEND_PORT}; default deny incoming"
+  if [[ -n "$PANEL_DOMAIN" ]]; then
+    ok "allowed 22, 80, 443; default deny incoming (domain mode)"
+  else
+    ok "allowed 22, 80, 443, ${FRONTEND_PORT}; default deny incoming (bare-IP mode)"
+  fi
 else
   ok "skipped (SKIP_FIREWALL=1)"
 fi
@@ -422,9 +430,9 @@ TRUST_PROXY_HOPS=2
 RATE_LIMIT_SUB_PER_MIN=30
 RATE_LIMIT_BOOTSTRAP_PER_MIN=10
 RATE_LIMIT_HEARTBEAT_PER_MIN=120
-LOGIN_LOCKOUT_FAILURES=5
-LOGIN_LOCKOUT_DURATION_MIN=15
-LOGIN_LOCKOUT_WINDOW_MIN=15
+LOGIN_LOCKOUT_FAILURES=10
+LOGIN_LOCKOUT_DURATION_MIN=5
+LOGIN_LOCKOUT_WINDOW_MIN=10
 
 # ACME contact email auto-injected into Hysteria/Naive install commands.
 # Leave empty to make the UI emit a placeholder admin fills manually.
