@@ -50,11 +50,12 @@ describe('buildMtprotoUri', () => {
     expect(uri).toContain('secret=eeAA');
   });
 
-  it('appends URI-encoded fragment', () => {
-    expect(buildMtprotoUri(opts).endsWith('#se-mtg-01')).toBe(true);
-    expect(buildMtprotoUri({ ...opts, name: 'se mtg #1' })).toContain(
-      '#se%20mtg%20%231',
-    );
+  // Regression: 2026-05-20 — Telegram iOS rejects tg://proxy URIs that
+  // carry a `#fragment` ("Некорректная ссылка на прокси"). Both forms
+  // (tg:// and https://t.me/proxy) must stay fragment-free.
+  it('emits no #fragment regardless of the name passed', () => {
+    expect(buildMtprotoUri(opts)).not.toContain('#');
+    expect(buildMtprotoUri({ ...opts, name: 'se mtg #1' })).not.toContain('#');
   });
 });
 
