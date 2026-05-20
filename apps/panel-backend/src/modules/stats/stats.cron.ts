@@ -33,7 +33,13 @@ export async function pollNodeStats(): Promise<{ ok: number; failed: number }> {
       deletedAt: null,
       status: { notIn: ['disabled', 'unreachable'] },
     },
-    select: { id: true, address: true, consumptionMultiplier: true },
+    // protocol is used below for the mtproto presence-only online fallback.
+    // Single-secret protocols (mtproto via mtg) can't attribute traffic to a
+    // specific userId, so the bytes-delta loop never touches user.onlineAt
+    // for them and the UI shows OFFLINE forever. We patch around that by
+    // treating "user is currently tracked by the adapter" as the online
+    // signal — only for protocols where the design forces this.
+    select: { id: true, address: true, consumptionMultiplier: true, protocol: true },
   });
   if (nodes.length === 0) return { ok: 0, failed: 0 };
 
@@ -81,13 +87,26 @@ export async function pollNodeStats(): Promise<{ ok: number; failed: number }> {
         // (only deltas since the last successful commit are at risk).
         type UserWrite = { userId: string; scaled: bigint };
         const userWrites: UserWrite[] = [];
+        // Presence-only userIds (mtproto-style adapters): we have zero bytes
+        // for them but the adapter reported them in res.users, which is the
+        // only signal we get that they exist on this node. Touch onlineAt
+        // without incrementing traffic so the UI stops showing OFFLINE
+        // forever for MTProto-only users. Documented limitation: per-user
+        // quotas still don't apply to mtproto bytes since we can't measure
+        // them — surface this to admins in the UI separately (see
+        // UserFormModal MTProto-row tooltip).
+        const presenceOnlyUserIds: string[] = [];
+        const isPresenceOnlyProtocol = node.protocol === 'mtproto';
         for (const u of userList) {
           const inB = BigInt(u.bytesIn || 0);
           const outB = BigInt(u.bytesOut || 0);
           nodeUpload += inB;
           nodeDownload += outB;
           const userDelta = inB + outB;
-          if (userDelta === 0n) continue;
+          if (userDelta === 0n) {
+            if (isPresenceOnlyProtocol) presenceOnlyUserIds.push(u.userId);
+            continue;
+          }
           const scaled =
             multiplier === 1
               ? userDelta
@@ -126,6 +145,29 @@ export async function pollNodeStats(): Promise<{ ok: number; failed: number }> {
               update: {
                 usedTrafficBytes: { increment: w.scaled },
                 lifetimeTrafficBytes: { increment: w.scaled },
+                onlineAt: now,
+                lastConnectedNodeId: node.id,
+              },
+            }),
+          );
+        }
+        // Presence-only upserts (MTProto fallback): touch onlineAt + record
+        // last node, but do not increment usedTrafficBytes — we cannot
+        // measure those bytes. firstConnectedAt seeded from `now` on first
+        // sighting so the user's "connected since" reflects reality.
+        for (const uid of presenceOnlyUserIds) {
+          writes.push(
+            prisma.userTraffic.upsert({
+              where: { userId: uid },
+              create: {
+                userId: uid,
+                usedTrafficBytes: 0n,
+                lifetimeTrafficBytes: 0n,
+                onlineAt: now,
+                firstConnectedAt: now,
+                lastConnectedNodeId: node.id,
+              },
+              update: {
                 onlineAt: now,
                 lastConnectedNodeId: node.id,
               },
