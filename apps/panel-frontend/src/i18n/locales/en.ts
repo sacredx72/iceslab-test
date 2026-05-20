@@ -44,13 +44,17 @@ export default {
     profiles: 'Profiles',
     squads: 'Squads',
     nodes: 'Nodes',
-    srr: 'SRR',
     queues: 'Queues',
     queuesDesc: 'BullMQ overview',
     settings: 'Settings',
     logout: 'Log out',
     signedInAs: 'Signed in as',
     workspace: 'Workspace',
+    subscriptionGroup: 'Subscription',
+    subscriptionMetadata: 'Metadata',
+    subscriptionRouting: 'Routing',
+    systemGroup: 'System',
+    searchPlaceholder: 'Search anything',
   },
 
   breadcrumb: {
@@ -59,7 +63,8 @@ export default {
     profiles: '/ PROFILES',
     squads: '/ SQUADS',
     nodes: '/ NODES',
-    srr: '/ SUBSCRIPTION RULES',
+    subscriptionMetadata: '/ SUBSCRIPTION · METADATA',
+    subscriptionRouting: '/ SUBSCRIPTION · ROUTING',
     settings: '/ SETTINGS',
   },
   login: {
@@ -74,7 +79,8 @@ export default {
   },
   nodes: {
     title: 'Nodes',
-    countOnline: '{{count}} nodes · {{online}} online',
+    countOnline_one: '{{count}} node · {{online}} online',
+    countOnline_other: '{{count}} nodes · {{online}} online',
     create: 'Create node',
     editTitle: 'Edit node',
     layoutCards: 'Cards',
@@ -193,6 +199,7 @@ export default {
       onlineHint: '{{today}} today · {{week}} this week',
       trafficToday: 'Traffic today',
       trafficVsYesterday: '{{delta}} vs yesterday',
+      trafficNoData: 'no data yet',
       activeUsers: 'Active users',
       ofTotal: 'of {{total}} total',
       nodesOnline: 'Nodes online',
@@ -298,36 +305,46 @@ export default {
       submitCreate: 'Create profile',
       submitEdit: 'Save',
       cfg: {
+        salamanderObfsLabel: 'Salamander obfs password',
         salamanderObfsDesc: 'Optional. Empty = no obfuscation.',
-        realityDestDesc: 'host:port - fronting decoy',
+        masqueradeUrlLabel: 'Masquerade URL',
+        brutalUpLabel: 'Brutal CC, ↑ Mbps',
+        brutalDownLabel: 'Brutal CC, ↓ Mbps',
+        realityDestDesc: 'host:port, fronting decoy',
         realityServerNamesDesc: 'comma-separated',
         realityShortIdsDesc: 'hex, comma-separated',
         realityFingerprintDesc: 'client TLS fingerprint',
         realityPrivateKeyDesc: "curve25519 base64. Click Generate or paste from `xray x25519`.",
         realityPublicKeyDesc: 'auto-derived from private',
-        realitySubprotocolDesc: 'VLESS - Vision-ready. Trojan - password auth.',
+        realitySubprotocolDesc: 'VLESS is Vision-ready. Trojan, password auth.',
         realitySubprotocolVless: 'VLESS (canonical)',
         realitySubprotocolTrojan: 'Trojan (no Vision)',
         realityFlowDesc: 'Vision only works with raw',
-        realityFlowNone: '(none) - no flow',
+        realityFlowNone: '(none), no flow',
         realityNetworkDesc: 'REALITY supports raw / xhttp / grpc',
-        realityNetworkRaw: 'raw (TCP) - Vision-compatible',
+        realityNetworkRaw: 'raw (TCP), Vision-compatible',
         xhttpPathDesc: 'HTTP path for the xhttp transport',
         hostHeaderDesc: 'optional, defaults to SNI',
         grpcServiceNameDesc: 'gRPC service name',
         generate: 'Generate',
         regenerate: 'Regenerate',
+        awgSubnetLabel: 'Subnet (CIDR)',
+        awgServerPrivLabel: 'Server private key',
+        awgServerPubLabel: 'Server public key',
         awgS1Desc: 'must differ',
         awgJDesc: 'pairwise-unique',
         awgHDesc: '> 4 and unique',
         awgHWarning:
-          'H1-H4 must be pairwise-unique - there are duplicates. Click Re-roll to regenerate.',
+          'H1-H4 must be pairwise-unique, there are duplicates. Click Re-roll to regenerate.',
+        naiveHostnameLabel: 'Public hostname',
+        naiveTlsEmailLabel: 'TLS contact email',
+        naiveMasqueradeLabel: 'Masquerade root',
         ssCipherLabel: 'Cipher method',
         ssNote:
           "Per-user password = the user's xrayUuid. Enable the shadowsocks protocol on the user.",
         mtprotoDomain: 'Masquerade domain',
         mtprotoDomainNote:
-          'Changing the domain rotates secrets for ALL users - existing subscriptions stop working.',
+          'Changing the domain rotates secrets for ALL users, existing subscriptions stop working.',
         mieruMtu: 'MTU',
       },
     },
@@ -400,6 +417,10 @@ export default {
       descriptionPlaceholder: 'Internal note',
       squadsDesc:
         '"All" is a system-managed fallback (auto-added only if no other squad is selected).',
+      squadsBothAllAndOther:
+        'User is in "All" AND another squad: profiles may double-count on dashboards. Uncheck "All" if you want only the custom set.',
+      squadsEmptyFallbackHint:
+        'No squad picked: the backend will auto-attach "All" on save so the subscription is not empty.',
       devicesTitle: 'Registered devices ({{count}})',
       devicesEmpty: 'No HWID-aware client has connected yet, or no limit is set.',
       deviceDelete: 'Free this slot - user can log in from a different device',
@@ -417,12 +438,14 @@ export default {
   },
   squads: {
     title: 'Internal squads',
-    subtitle: "Group ACL - which inbounds each user sees in their subscription",
+    subtitle: 'Group ACL: which inbounds each user sees in their subscription',
     create: 'Create',
     refresh: 'Refresh',
     open: 'Open',
     searchPlaceholder: 'Search by name or description…',
     empty: 'No squads.',
+    allDefaultName: 'All',
+    allDefaultDescription: 'Default group; new users join automatically.',
     deleteTitle: 'Delete squad "{{name}}"?',
     deleteBody: 'Users stay, but lose access to profiles bound to this squad. Users with no other squad get re-added to All.',
     deleteAllProtected: 'Squad "All" is system-protected and cannot be deleted.',
@@ -454,21 +477,7 @@ export default {
   },
   settings: {
     title: 'Settings',
-    subtitle: 'Authentication, API tokens, customization',
-    auth: {
-      title: 'Authentication methods',
-      description: 'Manage how admins sign in to the panel',
-      password: 'Password',
-      passwordHint: 'Username + password - primary method',
-      passkey: 'Passkey',
-      passkeyHint: 'WebAuthn / FIDO2 - Phase 3',
-      telegram: 'Telegram',
-      telegramHint: 'Telegram OAuth login widget',
-      genericOauth: 'Generic OAuth2',
-      soonBadge: 'soon',
-      passwordDisabledTooltip: "Primary method - can't be disabled until another one is set up",
-      comingSoonTooltip: 'Coming soon',
-    },
+    subtitle: 'Brand, API tokens, regions',
     tokens: {
       title: 'API tokens',
       description: 'Bearer tokens for integrations (bot, scripts)',
@@ -675,7 +684,8 @@ export default {
 
   // ───── Iceslab redesign - new chrome keys (cycle #11+) ─────
   pageHero: {
-    usersEyebrow: '{{total}} accounts · {{online}} online{{limited}}',
+    usersEyebrow_one: '{{count}} account · {{online}} online{{limited}}',
+    usersEyebrow_other: '{{count}} accounts · {{online}} online{{limited}}',
     usersEyebrowLimited: ' · {{count}} limited',
     usersTitle: 'Users.',
     usersSubtitle:
@@ -683,7 +693,7 @@ export default {
     profilesEyebrow: 'Inbound templates · 7 protocols supported',
     profilesTitle: 'Profiles.',
     profilesSubtitle:
-      'One profile is a logical inbound - protocol, obfuscation, DPI shape. Bind it to N nodes; one user picks it up via subscription.',
+      'One profile is a logical inbound: protocol, obfuscation, DPI shape. Bind it to N nodes and users pick it up via subscription.',
     inboundsEyebrow: 'Wired endpoints · {{count}} {{label}}',
     inboundsLabelOne: 'inbound',
     inboundsLabelMany: 'inbounds',
@@ -693,7 +703,7 @@ export default {
     nodesEyebrow: 'Fleet · {{vps}} VPS · {{countries}} countries',
     nodesTitle: 'Nodes.',
     nodesSubtitle:
-      'One node runs one protocol core. Panel pushes config over mTLS - agent applies and reports back.',
+      'One node runs one protocol core. Panel pushes config over mTLS, agent applies and reports back.',
     squadsEyebrow: 'Group ACL · {{count}} {{label}}',
     squadsLabelOne: 'squad',
     squadsLabelMany: 'squads',
@@ -701,7 +711,11 @@ export default {
     srrLabelOne: 'rule',
     srrLabelMany: 'rules',
     srrTitle: 'Subscription Rules.',
-    settingsEyebrow: 'Panel config · saved on commit',
+    settingsEyebrow: 'Panel config',
+    subscriptionMetadataEyebrow: 'Subscription · client-facing headers',
+    subscriptionMetadataTitle: 'Metadata.',
+    subscriptionMetadataSubtitle:
+      'Title, refresh cadence, support URL and announce banner that Hiddify, Streisand, Happ and V2RayNG read alongside the subscription.',
     dashboardEyebrow: 'Live · auto-refresh 10s · {{time}}',
     dashboardHeadlineQuiet: 'Quiet day on the line.',
     dashboardHeadlineBusy: 'Busy fleet today.',
@@ -713,6 +727,7 @@ export default {
     dashboardFooterNeverOnlinePlural:
       '{{count}} users never online · Review provisioning',
     dashboardFooterAllProvisioned: 'All users provisioned',
+    dashboardFooterNoUsers: 'No users yet',
     hostSystemSubtitle: 'panel server',
     uptimeLabel: 'Uptime',
     sampledLabel: 'Sampled',
@@ -729,19 +744,23 @@ export default {
     profileEditSubtitle: 'Edit template · applies on next deploy',
     squadNewTitle: 'New squad',
     squadNewSubtitle: 'Access slice · group of users + profiles',
-    squadEditSubtitle: 'Edit membership · changes save on commit',
+    squadEditSubtitle: 'Edit membership',
     shortcutCreate: '⏎ Create · Esc Cancel',
     shortcutSave: '⏎ Save · Esc Cancel',
     shortcutTabNext: 'Tab Next field · Esc Cancel',
     shortcutCreateBack: '⏎ Create · ← Back Edit params',
     shortcutBuiltin: 'Built-in · read-only',
     stepNext: 'Next: pick profiles →',
-    createWithBindings: 'Create node + {{count}} bindings',
+    createWithBindings_one: 'Create node + {{count}} binding',
+    createWithBindings_other: 'Create node + {{count}} bindings',
   },
 
   loginPage: {
-    topbarVersion: 'V1.0 · Operator panel',
-    topbarStatus: 'All systems normal',
+    // {{version}} injected at runtime from package.json via vite-define.
+    topbarVersion: 'v{{version}} · Operator panel · Alpha',
+    topbarStatusNormal: 'Backend reachable',
+    topbarStatusDegraded: 'Backend degraded',
+    topbarStatusDown: 'Backend unreachable',
     signInBadge: 'Sign in',
     heroLine1: 'Operator',
     heroLine2: 'console.',
@@ -754,8 +773,7 @@ export default {
     bootstrapTo: 'Bootstrap {{brand}}',
     continueAction: 'Continue →',
     createAdminAction: 'Create admin →',
-    passkeyHint: 'Passkey, Telegram, GitHub',
-    soonLabel: 'Soon',
+    bootstrapHint: 'First admin has full panel access. Choose a strong password, bootstrap runs once.',
     signInFailed: 'Sign-in failed',
     unknownError: 'Unknown error',
   },
@@ -774,6 +792,16 @@ export default {
     portRange: 'Port must be 1–65535',
     emailInvalid: 'Invalid email',
     required: 'Required',
+    xray: {
+      networkInvalid:
+        'xray-core will reject the config: REALITY supports only raw / xhttp / grpc, not "{{network}}".',
+      visionRequiresRaw:
+        'Vision flow is incompatible with {{network}}. Set Flow = "(none)" or Network = "raw".',
+      trojanIgnoresFlow:
+        'Trojan does not use flow; the field will be ignored by the client.',
+      rawWithoutVisionSlow:
+        'Without Vision flow on raw transport you lose ~30% throughput to TLS-in-TLS. Add Vision if subprotocol = vless.',
+    },
   },
 
   srr: {
@@ -837,6 +865,8 @@ export default {
     copiedShort: 'Copied',
     tooltipUsers: 'Users',
     tooltipProfiles: 'Profiles',
+    mtprotoNoPerUserStats:
+      'MTProto (mtg) is single-secret — every user shares the same wire identity. Per-user traffic and quotas do not apply to MTProto bytes. Check the node card "Today" counter for actual usage.',
     devicesTitle: 'HWID Devices',
   },
 
@@ -862,10 +892,11 @@ export default {
   },
 
   squadForm: {
-    builtinSystemTooltip: 'Built-in squad - auto-tracks all inbounds',
+    builtinSystemTooltip: 'Built-in squad: auto-tracks all inbounds',
     selectAll: 'Select all',
     deselectAll: 'Deselect all',
     deployedTooltip: 'Deployed on nodes',
+    profileOffBadge: 'off',
   },
 
   profileForm: {
@@ -908,6 +939,7 @@ export default {
   userStatus: {
     online: 'Online',
     offline: 'Offline',
+    active: 'Active',
     limited: 'Limited',
     expired: 'Expired',
     disabled: 'Disabled',

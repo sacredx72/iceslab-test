@@ -29,7 +29,10 @@ export interface MtprotoUriOpts {
   secret: string;
   host: string;
   port: number;
-  /** URL fragment shown in clients (typically the node name). */
+  /** Kept for backwards compatibility with the slice-41 signature. Telegram
+   *  no longer accepts a `#fragment` on tg://proxy URIs — it returns
+   *  "Некорректная ссылка на прокси" / "Invalid proxy link" — so we don't
+   *  append the name to the URI anymore. Caller still passes it; we ignore. */
   name: string;
 }
 
@@ -40,7 +43,10 @@ export function buildMtprotoUri(opts: MtprotoUriOpts): string {
     port: String(opts.port),
     secret: opts.secret,
   });
-  return `tg://proxy?${params.toString()}#${encodeURIComponent(opts.name)}`;
+  // No `#fragment`. Caught live 2026-05-20 on iOS Telegram: identical URI
+  // with `#mtpro` appended → "Некорректная ссылка на прокси", same URI
+  // without fragment → opens proxy dialog fine. Same as t.me/proxy form.
+  return `tg://proxy?${params.toString()}`;
 }
 
 /**

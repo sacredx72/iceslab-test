@@ -1,5 +1,9 @@
 # Iceslab
 
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](./LICENSE)
+[![Status: alpha](https://img.shields.io/badge/status-alpha-orange.svg)](#)
+[![GitHub stars](https://img.shields.io/github/stars/icecompany-tech/iceslab?style=social)](https://github.com/icecompany-tech/iceslab)
+
 English · [Русский](./README.ru.md)
 
 Self-hosted proxy management panel that runs the real upstream binary for each protocol instead of wrapping everything through Xray-core. Hysteria 2, Xray (VLESS + REALITY + Vision), AmneziaWG kernel module, NaiveProxy (Caddy fork), Shadowsocks 2022, MTProto, Mieru — each one is the actual project binary, managed by a Go node-agent under a unified `CoreAdapter` interface.

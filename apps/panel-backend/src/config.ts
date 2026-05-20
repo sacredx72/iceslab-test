@@ -100,9 +100,9 @@ const ConfigSchema = z.object({
   // for the same username (case-insensitive) within the window, lock the
   // account for LOCKOUT_DURATION_MIN minutes regardless of source IP.
   // Per-IP rate limit is separate (faster, lower threshold).
-  LOGIN_LOCKOUT_FAILURES: z.coerce.number().int().min(1).default(5),
-  LOGIN_LOCKOUT_DURATION_MIN: z.coerce.number().int().min(1).default(15),
-  LOGIN_LOCKOUT_WINDOW_MIN: z.coerce.number().int().min(1).default(15),
+  LOGIN_LOCKOUT_FAILURES: z.coerce.number().int().min(1).default(10),
+  LOGIN_LOCKOUT_DURATION_MIN: z.coerce.number().int().min(1).default(5),
+  LOGIN_LOCKOUT_WINDOW_MIN: z.coerce.number().int().min(1).default(10),
 
   // ACME contact email used by node-installers that need a Let's Encrypt
   // cert (Hysteria 2 / NaiveProxy / Caddy). Optional — install command

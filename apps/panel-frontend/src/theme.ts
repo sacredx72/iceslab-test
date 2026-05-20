@@ -19,7 +19,7 @@ import {
 } from '@mantine/core';
 import type { MantineColorsTuple } from '@mantine/core';
 
-// IceCore palette — keep in sync with index.css overrides
+// IceCore palette, keep in sync with index.css overrides
 const SNOW = '#C8D4E3';
 const MIST = '#7A8BA3';
 const HAIRLINE = '#1C2A3D';
@@ -27,21 +27,21 @@ const CARD = '#0F1A28';
 const GROUND = '#08101A';
 const CYAN = '#7DD3FC';
 
-// Mantine `dark[N]` palette — N=9 darkest, N=0 lightest. Mantine reads these
+// Mantine `dark[N]` palette, N=9 darkest, N=0 lightest. Mantine reads these
 // for default-styled surfaces (body, modals, popovers, default Buttons,
 // hover states). Overriding them once cascades the IceCore palette across
 // every uncustomized component.
 const dark: MantineColorsTuple = [
-  SNOW,         // 0 — primary text
+  SNOW,         // 0, primary text
   '#A5B4C7',    // 1
-  MIST,         // 2 — dimmed text
+  MIST,         // 2, dimmed text
   '#5A6B82',    // 3
   '#3A4A60',    // 4
-  '#2C3A4E',    // 5 — subtle border
-  CARD,         // 6 — card surface (Mantine "default" bg)
-  '#0B1420',    // 7 — body surface (Modal content)
-  GROUND,       // 8 — body bg
-  '#040810',    // 9 — deepest
+  '#2C3A4E',    // 5, subtle border
+  CARD,         // 6, card surface (Mantine "default" bg)
+  '#0B1420',    // 7, body surface (Modal content)
+  GROUND,       // 8, body bg
+  '#040810',    // 9, deepest
 ];
 
 const cyan: MantineColorsTuple = [
@@ -124,7 +124,7 @@ const violet: MantineColorsTuple = [
 
 const MONO = "'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
 
-// Shared input label/input look — applied to TextInput/Select/NumberInput/Textarea/etc
+// Shared input label/input look, applied to TextInput/Select/NumberInput/Textarea/etc
 const inputStyles = {
   label: {
     color: MIST,
@@ -245,6 +245,20 @@ export const theme = createTheme({
     }),
     Button: Button.extend({
       defaultProps: { radius: 'md' },
+      // Mantine's default <Button variant="filled"> uses primaryColor for
+      // background and theme.white for text. We set primaryColor='cyan'
+      // (light) and white=SNOW (also light) — the pair renders unreadable
+      // cyan-on-snow CTAs ("I have saved it" in NodePayloadModal, etc).
+      // Override --button-color to GROUND for filled+default-color so every
+      // CTA is legible without per-call style overrides. Buttons that pass
+      // an explicit color (red/green/etc) keep Mantine's normal contrast.
+      vars: (_theme, props) => {
+        const filled = props.variant === 'filled' || props.variant === undefined;
+        if (filled && !props.color) {
+          return { root: { '--button-color': GROUND } };
+        }
+        return { root: {} };
+      },
     }),
     Badge: Badge.extend({
       defaultProps: { radius: 'sm' },

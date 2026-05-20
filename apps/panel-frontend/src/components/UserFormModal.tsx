@@ -307,8 +307,8 @@ export function UserFormModal({ opened, onClose, user, onSubmit, loading }: Prop
                   <Select
                     label={t('users.table.status')}
                     data={[
-                      { value: 'active', label: 'Active' },
-                      { value: 'disabled', label: 'Disabled' },
+                      { value: 'active', label: t('userStatus.active') },
+                      { value: 'disabled', label: t('userStatus.disabled') },
                     ]}
                     {...form.getInputProps('status')}
                   />
@@ -398,7 +398,6 @@ export function UserFormModal({ opened, onClose, user, onSubmit, loading }: Prop
                 </Text>
                 <Stack gap={6}>
                   {(squadsQuery.data?.squads ?? []).map((s) => {
-                    const isAll = s.id === ALL_SQUAD_ID;
                     const checked = form.values.groupIds.includes(s.id);
                     return (
                       <SquadRow
@@ -407,9 +406,13 @@ export function UserFormModal({ opened, onClose, user, onSubmit, loading }: Prop
                         userCount={s.memberCount}
                         profileCount={s.profileIds.length}
                         checked={checked}
-                        disabled={isAll}
+                        // Earlier the All-row was disabled — operators couldn't
+                        // remove a user from All even when they wanted to and
+                        // pre-checking on edit was confusing. Now any squad
+                        // (incl. All) is freely toggleable; if the admin clears
+                        // every squad the backend re-applies the All-fallback
+                        // at save time so the user is never dead-on-arrival.
                         onToggle={() => {
-                          if (isAll) return;
                           const cur = form.values.groupIds;
                           form.setFieldValue(
                             'groupIds',
@@ -420,6 +423,20 @@ export function UserFormModal({ opened, onClose, user, onSubmit, loading }: Prop
                     );
                   })}
                 </Stack>
+                {/* Visible nudge when admin has both All and another squad
+                    picked — used to silently double-count profiles on the
+                    dashboard and surprise admins. Now they at least see it. */}
+                {form.values.groupIds.includes(ALL_SQUAD_ID) &&
+                  form.values.groupIds.length > 1 && (
+                    <Text size="xs" c="yellow.4" mt="xs">
+                      {t('users.form.squadsBothAllAndOther')}
+                    </Text>
+                  )}
+                {form.values.groupIds.length === 0 && (
+                  <Text size="xs" c="dimmed" mt="xs">
+                    {t('users.form.squadsEmptyFallbackHint')}
+                  </Text>
+                )}
               </SectionCard>
             </Stack>
           </SimpleGrid>
@@ -557,7 +574,7 @@ function ProfileHeader({ user, subUrl }: { user: User; subUrl: string }) {
                 {user.username}
               </Text>
               <Badge variant="light" color={STATUS_COLORS[user.status] ?? 'gray'} tt="uppercase">
-                {user.status}
+                {t(`userStatus.${user.status}`, { defaultValue: user.status })}
               </Badge>
             </Group>
             <Text size="xs" c="dimmed" ff="monospace">
@@ -866,6 +883,16 @@ function DirectEndpointRow({
       ? t('userForm.copyUri')
       : t('userForm.copyWgconfHint');
 
+  // mtg is single-secret upstream — every user of the inbound shares the
+  // same wire identity, so per-user byte accounting is architecturally
+  // impossible. The traffic counter and lastOnlineAt for MTProto-only
+  // users will both look like the user never connected. Surface that
+  // honestly with a small note so admins don't suspect a bug. (Panel-
+  // side fallback in stats.cron.ts treats adapter-tracked presence as
+  // "online", so the OFFLINE-forever bug is gone, but per-user TRAFFIC
+  // counters remain at zero and per-user quotas don't apply.)
+  const isMtproto = endpoint.protocol.toLowerCase() === 'mtproto';
+
   return (
     <Paper withBorder p="xs" radius="sm" style={{ overflow: 'hidden' }}>
       <Group justify="space-between" wrap="nowrap" gap="xs">
@@ -877,18 +904,27 @@ function DirectEndpointRow({
             {endpoint.nodeName} · {endpoint.host}:{endpoint.port}
           </Text>
         </Group>
-        <Tooltip label={tooltipLabel} multiline w={260}>
-          <ActionIcon
-            variant="light"
-            size="sm"
-            onClick={handleCopy}
-            color={copied ? 'green' : hasUri ? 'blue' : 'grape'}
-            style={{ flexShrink: 0 }}
-            disabled={!hasUri && !wgconfUrl}
-          >
-            {copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
-          </ActionIcon>
-        </Tooltip>
+        <Group gap={4} wrap="nowrap">
+          {isMtproto && (
+            <Tooltip label={t('userForm.mtprotoNoPerUserStats')} multiline w={280} position="left">
+              <Badge variant="light" color="yellow" size="xs" style={{ cursor: 'help' }}>
+                ⓘ
+              </Badge>
+            </Tooltip>
+          )}
+          <Tooltip label={tooltipLabel} multiline w={260}>
+            <ActionIcon
+              variant="light"
+              size="sm"
+              onClick={handleCopy}
+              color={copied ? 'green' : hasUri ? 'blue' : 'grape'}
+              style={{ flexShrink: 0 }}
+              disabled={!hasUri && !wgconfUrl}
+            >
+              {copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
+            </ActionIcon>
+          </Tooltip>
+        </Group>
       </Group>
     </Paper>
   );

@@ -255,6 +255,12 @@ function SquadCard({
   const isAll = squad.id === ALL_SQUAD_ID;
   const profileCount = squad.profileIds.length;
   const memberCount = squad.memberCount;
+  // The "All" squad is seeded in English from a migration. Override the
+  // displayed name/description with i18n so RU users don't see English text.
+  const displayName = isAll ? t('squads.allDefaultName') : squad.name;
+  const displayDescription = isAll
+    ? t('squads.allDefaultDescription')
+    : squad.description;
 
   return (
     <Card
@@ -282,7 +288,7 @@ function SquadCard({
           <Stack gap={0} style={{ minWidth: 0 }}>
             <Group gap={6} wrap="nowrap">
               <Text fw={700} size="sm" truncate>
-                {squad.name}
+                {displayName}
               </Text>
               {isAll && (
                 <Tooltip label={t('squadForm.builtinSystemTooltip')}>
@@ -290,9 +296,9 @@ function SquadCard({
                 </Tooltip>
               )}
             </Group>
-            {squad.description && (
+            {displayDescription && (
               <Text size="xs" c="dimmed" lineClamp={1}>
-                {squad.description}
+                {displayDescription}
               </Text>
             )}
           </Stack>

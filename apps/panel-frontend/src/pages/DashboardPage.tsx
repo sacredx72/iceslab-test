@@ -95,11 +95,18 @@ function splitBytes(n: number): { value: string; unit: string } {
   return { value, unit: units[i] };
 }
 
-function formatDelta(value: number, base: number): { text: string; positive: boolean } {
-  if (base === 0) return { text: formatBytes(value), positive: value >= 0 };
+function formatDelta(
+  value: number,
+  base: number,
+): { text: string; positive: boolean; noData: boolean } {
+  // No traffic yet on either side — empty deltas like "0 B vs yesterday" read
+  // weird and break in two lines on narrow viewports. Signal "no data" so the
+  // hint can show a friendlier placeholder.
+  if (value === 0 && base === 0) return { text: '', positive: true, noData: true };
+  if (base === 0) return { text: formatBytes(value), positive: value >= 0, noData: false };
   const delta = value - base;
   const sign = delta >= 0 ? '+' : '−';
-  return { text: `${sign}${formatBytes(Math.abs(delta))}`, positive: delta >= 0 };
+  return { text: `${sign}${formatBytes(Math.abs(delta))}`, positive: delta >= 0, noData: false };
 }
 
 function relativeTime(iso: string): string {
@@ -275,7 +282,11 @@ function DashboardContent({ data }: { data: DashboardOverview }) {
           label={t('dashboard.hero.trafficToday')}
           value={todaySplit.value}
           unit={todaySplit.unit}
-          hint={t('dashboard.hero.trafficVsYesterday', { delta: todayDelta.text })}
+          hint={
+            todayDelta.noData
+              ? t('dashboard.hero.trafficNoData')
+              : t('dashboard.hero.trafficVsYesterday', { delta: todayDelta.text })
+          }
           hintColor={todayDelta.positive ? MOSS : RED}
         />
         <StatCard
@@ -656,14 +667,16 @@ function DashboardContent({ data }: { data: DashboardOverview }) {
             }}
           />
           <Text style={{ ...MONO_LABEL, color: users.neverOnline > 0 ? AMBER : MIST }}>
-            {users.neverOnline > 0
-              ? t(
-                  users.neverOnline === 1
-                    ? 'pageHero.dashboardFooterNeverOnline'
-                    : 'pageHero.dashboardFooterNeverOnlinePlural',
-                  { count: users.neverOnline },
-                )
-              : t('pageHero.dashboardFooterAllProvisioned')}
+            {users.total === 0
+              ? t('pageHero.dashboardFooterNoUsers')
+              : users.neverOnline > 0
+                ? t(
+                    users.neverOnline === 1
+                      ? 'pageHero.dashboardFooterNeverOnline'
+                      : 'pageHero.dashboardFooterNeverOnlinePlural',
+                    { count: users.neverOnline },
+                  )
+                : t('pageHero.dashboardFooterAllProvisioned')}
           </Text>
         </Group>
         <Text style={{ ...MONO_LABEL }}>
@@ -675,7 +688,7 @@ function DashboardContent({ data }: { data: DashboardOverview }) {
             minute: '2-digit',
             second: '2-digit',
           }).toUpperCase()}
-          {' '}MSK · V1.0.0-RC.2
+          {' '}MSK · v{__APP_VERSION__}
         </Text>
       </Group>
     </Stack>
@@ -758,11 +771,11 @@ function SystemHealth({ host }: { host: DashboardOverview['host'] }) {
           icon={<IconActivity size={16} />}
           color={VIOLET}
           label={t('dashboard.health.processMem')}
-          percent={(host.process.heapUsedBytes / Math.max(1, host.process.heapTotalBytes)) * 100}
+          percent={(host.process.heapUsedBytes / Math.max(1, host.process.heapLimitBytes)) * 100}
           primary={`RSS ${formatBytes(host.process.rssBytes)}`}
           secondary={t('dashboard.health.processSecondary', {
             used: formatBytes(host.process.heapUsedBytes),
-            total: formatBytes(host.process.heapTotalBytes),
+            total: formatBytes(host.process.heapLimitBytes),
           })}
         />
       </SimpleGrid>

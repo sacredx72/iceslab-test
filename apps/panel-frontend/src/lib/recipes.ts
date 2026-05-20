@@ -1,5 +1,5 @@
 /**
- * Transport Recipes — pre-validated config presets for the ProfileFormModal.
+ * Transport Recipes, pre-validated config presets for the ProfileFormModal.
  *
  * Each recipe is a one-click "I want to achieve X" choice that fills in a
  * known-good combination of fields. Lets new admins configure DPI-resistant
@@ -8,7 +8,7 @@
  * Differentiator vs Remnawave/Marzban: those panels show raw form fields
  * sorted alphabetically; we group by intent ("max stealth" / "CDN-friendly"
  * / "RU-mobile-tuned") and self-validate combos that xray-core silently
- * rejects (REALITY+ws is the canonical example — looks fine in the form,
+ * rejects (REALITY+ws is the canonical example, looks fine in the form,
  * dies on `xray run` with `REALITY only supports RAW, XHTTP and gRPC`).
  *
  * Recipes only touch protocol-specific fields. Common fields (name,
@@ -20,9 +20,9 @@ import type { ProtocolName } from './api';
 export interface Recipe {
   id: string;
   protocol: ProtocolName;
-  /** Single emoji in the chip — pick from a tight palette for visual variety. */
+  /** Single emoji in the chip, pick from a tight palette for visual variety. */
   emoji: string;
-  /** Card title — short, direct, intent-driven. */
+  /** Card title, short, direct, intent-driven. */
   name: string;
   /** One-line subtitle explaining when to pick this. */
   description: string;
@@ -39,7 +39,7 @@ export interface Recipe {
   /** Long-form description shown when card is selected. */
   details: string;
   /**
-   * Field overrides applied on click. Keyed loosely — the form merges
+   * Field overrides applied on click. Keyed loosely, the form merges
    * these into existing values. Only protocol-specific fields belong here.
    *
    * Accepts a plain object OR a thunk that returns one. The thunk form is
@@ -59,7 +59,7 @@ export interface Recipe {
   notes?: string[];
 }
 
-// Random path generator — REALITY+xhttp benefits from unpredictable paths
+// Random path generator, REALITY+xhttp benefits from unpredictable paths
 // because static "/api/v1/stream" can fingerprint Iceslab deployments.
 function randPath(): string {
   const a = Math.random().toString(36).slice(2, 10);
@@ -67,7 +67,7 @@ function randPath(): string {
 }
 
 // AmneziaWG H1-H4 magic-header bytes. Spec requires > 4 + pairwise unique
-// + random within int32 — a hardcoded 100/200/300/400 fingerprints every
+// + random within int32, a hardcoded 100/200/300/400 fingerprints every
 // "Iran-tuned recipe" deploy as Iceslab. Roll fresh on apply.
 function randAwgHeader(): number {
   return 5 + Math.floor(Math.random() * (2_147_483_643 - 5));
@@ -102,9 +102,9 @@ export const RECIPES: Recipe[] = [
     protocol: 'xray',
     emoji: '🛡',
     name: 'REALITY + Vision (raw)',
-    description: 'Канонический stealth — маскировка под HTTPS-сайт',
+    description: 'Канонический stealth, маскировка под HTTPS-сайт',
     details:
-      'VLESS + REALITY + Vision flow поверх raw TCP. Trafic выглядит для DPI как обычный HTTPS-запрос на крупный CDN-сайт (Cloudflare/Apple/etc). Vision flow добавляет zero-copy splice — самый быстрый путь без потери на маскировке. Это рекомендуемый дефолт для большинства ситуаций.',
+      'VLESS + REALITY + Vision flow поверх raw TCP. Trafic выглядит для DPI как обычный HTTPS-запрос на крупный CDN-сайт (Cloudflare/Apple/etc). Vision flow добавляет zero-copy splice, самый быстрый путь без потери на маскировке. Это рекомендуемый дефолт для большинства ситуаций.',
     dpiResistance: 5,
     speed: 5,
     apply: {
@@ -116,7 +116,7 @@ export const RECIPES: Recipe[] = [
       xrayFingerprint: 'chrome',
     },
     notes: [
-      'Vision работает только с raw — не меняй транспорт после применения recipe',
+      'Vision работает только с raw, не меняй транспорт после применения recipe',
     ],
   },
   {
@@ -126,7 +126,7 @@ export const RECIPES: Recipe[] = [
     name: 'REALITY + xhttp (HTTP/2 chunked)',
     description: 'Для жёсткого DPI который режет VLESS+raw',
     details:
-      'VLESS + REALITY + xhttp transport. Trafic уезжает в HTTP/2 chunked-stream — выглядит как обычный HTTP/2 запрос (выпадает в общую массу h2 трафика к CDN). Чуть медленнее raw (≈10-15% потери на framing), но обходит DPI который начал режать REALITY+raw в некоторых ISP. Без Vision — для xhttp Vision не работает.',
+      'VLESS + REALITY + xhttp transport. Trafic уезжает в HTTP/2 chunked-stream, выглядит как обычный HTTP/2 запрос (выпадает в общую массу h2 трафика к CDN). Чуть медленнее raw (≈10-15% потери на framing), но обходит DPI который начал режать REALITY+raw в некоторых ISP. Без Vision, для xhttp Vision не работает.',
     dpiResistance: 5,
     speed: 4,
     apply: () => ({
@@ -139,8 +139,8 @@ export const RECIPES: Recipe[] = [
       xrayPath: randPath(),
     }),
     notes: [
-      'Path рандомизирован — не показывай его публично',
-      'Если REALITY+raw блокируется в твоей сети — xhttp обычно ещё работает',
+      'Path рандомизирован, не показывай его публично',
+      'Если REALITY+raw блокируется в твоей сети, xhttp обычно ещё работает',
     ],
   },
   {
@@ -150,7 +150,7 @@ export const RECIPES: Recipe[] = [
     name: 'Trojan + REALITY',
     description: 'Password-auth вместо UUID, anti-probe defense',
     details:
-      'Trojan через xray-core + REALITY. Пользователи аутентифицируются паролем (мы reuse user.xrayUuid как пароль). При неверной аутентификации сервер возвращает реальный HTTPS-ответ с decoy-сайта — anti-probe защита. Без Vision (Trojan его не поддерживает). Полезно для legacy-клиентов которые не умеют VLESS.',
+      'Trojan через xray-core + REALITY. Пользователи аутентифицируются паролем (мы reuse user.xrayUuid как пароль). При неверной аутентификации сервер возвращает реальный HTTPS-ответ с decoy-сайта, anti-probe защита. Без Vision (Trojan его не поддерживает). Полезно для legacy-клиентов которые не умеют VLESS.',
     dpiResistance: 5,
     speed: 4,
     apply: {
@@ -169,9 +169,9 @@ export const RECIPES: Recipe[] = [
     protocol: 'hysteria',
     emoji: '⚡',
     name: 'Hysteria 2 (clean)',
-    description: 'UDP, низкая latency, без obfs — для свободных регионов',
+    description: 'UDP, низкая latency, без obfs, для свободных регионов',
     details:
-      'Hysteria 2 поверх QUIC (UDP) без обфускации. Самая низкая latency (UDP без TCP-handshake) и хорошая throughput через Brutal CC. Без obfs — DPI может обнаружить QUIC-трафик. Подходит для регионов без активного UDP-DPI.',
+      'Hysteria 2 поверх QUIC (UDP) без обфускации. Самая низкая latency (UDP без TCP-handshake) и хорошая throughput через Brutal CC. Без obfs, DPI может обнаружить QUIC-трафик. Подходит для регионов без активного UDP-DPI.',
     dpiResistance: 2,
     speed: 5,
     apply: {
@@ -191,7 +191,7 @@ export const RECIPES: Recipe[] = [
     name: 'Hysteria 2 + Salamander (RU mobile)',
     description: 'Obfuscation для обхода UDP-DPI на РФ-мобиле',
     details:
-      'Hysteria 2 с Salamander obfuscation password. Каждый UDP-пакет XOR-шифруется производным от пароля ключом — DPI не видит QUIC-сигнатуру. На РФ мобильных (Megafon/MTS/Beeline) clean Hysteria часто throttled до tx:0; Salamander обычно проходит. Brutal CC параметры выставлены для пиков 100 Mbps.',
+      'Hysteria 2 с Salamander obfuscation password. Каждый UDP-пакет XOR-шифруется производным от пароля ключом, DPI не видит QUIC-сигнатуру. На РФ мобильных (Megafon/MTS/Beeline) clean Hysteria часто throttled до tx:0; Salamander обычно проходит. Brutal CC параметры выставлены для пиков 100 Mbps.',
     dpiResistance: 4,
     speed: 5,
     apply: () => ({
@@ -199,7 +199,7 @@ export const RECIPES: Recipe[] = [
       hyMasqueradeUrl: 'https://www.bing.com',
       hyBrutalUp: 100,
       hyBrutalDown: 100,
-      // Port-hopping (slice 31.5) — critical on RU mobile carriers.
+      // Port-hopping (slice 31.5), critical on RU mobile carriers.
       // Без него ТСПУ срезает QUIC-handshake на :443 за секунды.
       // install-iceslab-node.sh по умолчанию выставляет iptables NAT redirect
       // для 20000-50000 → :443, так что client может слать на любой
@@ -209,9 +209,9 @@ export const RECIPES: Recipe[] = [
       hyPortHopEnd: 50000,
     }),
     notes: [
-      'Obfs password сгенерирован случайно — не теряй его, нужен на клиентах',
-      'Brutal CC 100/100 Mbps — настрой под реальную пропускную способность ноды',
-      'Port-hopping 20000-50000 включён — без него RU TSPU режет QUIC. install-iceslab-node.sh уже выставил iptables NAT для этого range',
+      'Obfs password сгенерирован случайно, не теряй его, нужен на клиентах',
+      'Brutal CC 100/100 Mbps, настрой под реальную пропускную способность ноды',
+      'Port-hopping 20000-50000 включён, без него RU TSPU режет QUIC. install-iceslab-node.sh уже выставил iptables NAT для этого range',
     ],
   },
 
@@ -221,7 +221,7 @@ export const RECIPES: Recipe[] = [
     protocol: 'amneziawg',
     emoji: '🔐',
     name: 'AmneziaWG (default)',
-    description: 'Дефолтные obfs параметры — для большинства ISP',
+    description: 'Дефолтные obfs параметры, для большинства ISP',
     details:
       'AmneziaWG (форк WireGuard с DPI-bypass). Дефолтный preset Jc/Jmin/Jmax + S/H обфускации скрывает WireGuard-сигнатуру. Подходит для большинства провайдеров. На особо жёстких ISP попробуй "Iran-tuned".',
     dpiResistance: 4,
@@ -238,14 +238,14 @@ export const RECIPES: Recipe[] = [
     name: 'AmneziaWG (Iran-tuned)',
     description: 'Обфускация под иранский DPI',
     details:
-      'AmneziaWG с параметрами обфускации, рекомендованными командой Amnezia для иранских ISP. Jc=4 (junk count), специфические S1-S4 паддинги, H1-H4 хедер-байты. На иранском DPI default-параметры не проходят, эти — да. Также часто помогают на корпоративных firewall.',
+      'AmneziaWG с параметрами обфускации, рекомендованными командой Amnezia для иранских ISP. Jc=4 (junk count), специфические S1-S4 паддинги, H1-H4 хедер-байты. На иранском DPI default-параметры не проходят, эти, да. Также часто помогают на корпоративных firewall.',
     dpiResistance: 5,
     speed: 4,
     apply: () => ({
       // Values within upstream v2.0 bounds (Jmin/Jmax 64..1024, S1-S2 0..64).
       // Iran-tuned variant: more junk packets (Jc=6) + larger Jmax for
       // bigger size variance vs default TSPU.
-      // S3+S4 forced to 0 — AmneziaVPN client 4.8.15.x drops traffic
+      // S3+S4 forced to 0, AmneziaVPN client 4.8.15.x drops traffic
       // with non-zero S3/S4 (upstream bug #2582). Reverted to non-zero
       // when upstream fixes the client.
       awgPreset: 'custom',
@@ -276,7 +276,7 @@ export const RECIPES: Recipe[] = [
       naiveMasquerade: '/var/www/html',
     },
     notes: [
-      'Hostname и tlsEmail заполни вручную — нужен реальный домен с A-записью на ноду',
+      'Hostname и tlsEmail заполни вручную, нужен реальный домен с A-записью на ноду',
     ],
   },
 
@@ -286,9 +286,9 @@ export const RECIPES: Recipe[] = [
     protocol: 'shadowsocks',
     emoji: '🔒',
     name: 'SS-2022 (blake3-aes-256)',
-    description: 'Современный Shadowsocks — XChaCha20 уровень security',
+    description: 'Современный Shadowsocks, XChaCha20 уровень security',
     details:
-      'Shadowsocks 2022 с шифром 2022-blake3-aes-256-gcm. Современная alternative AEAD — лучше по производительности и резистентности к probe-attacks чем legacy chacha20. Поддерживается всеми актуальными SS-клиентами (Outline, Shadowrocket, sing-box).',
+      'Shadowsocks 2022 с шифром 2022-blake3-aes-256-gcm. Современная alternative AEAD, лучше по производительности и резистентности к probe-attacks чем legacy chacha20. Поддерживается всеми актуальными SS-клиентами (Outline, Shadowrocket, sing-box).',
     dpiResistance: 3,
     speed: 5,
     apply: {
@@ -302,9 +302,9 @@ export const RECIPES: Recipe[] = [
     protocol: 'mtproto',
     emoji: '📞',
     name: 'MTProto (Telegram)',
-    description: 'Только для Telegram-клиента — отдельный use case',
+    description: 'Только для Telegram-клиента, отдельный use case',
     details:
-      'MTProto-прокси для Telegram. Это НЕ general-purpose VPN — только Telegram-трафик. Один shared secret на все юзеры (upstream 9seconds/mtg ограничение). Полезно когда Telegram забанен но хочется быстрого канала именно для месседжера.',
+      'MTProto-прокси для Telegram. Это НЕ general-purpose VPN, только Telegram-трафик. Один shared secret на все юзеры (upstream 9seconds/mtg ограничение). Полезно когда Telegram забанен но хочется быстрого канала именно для месседжера.',
     dpiResistance: 4,
     speed: 5,
     apply: {
@@ -318,9 +318,9 @@ export const RECIPES: Recipe[] = [
     protocol: 'mieru',
     emoji: '🌸',
     name: 'Mieru (Chinese GFW)',
-    description: 'Специально под Great Firewall — random padding',
+    description: 'Специально под Great Firewall, random padding',
     details:
-      'Mieru от enfein — современный stealth-протокол с агрессивным паддингом, разработан против Chinese GFW. Trafic выглядит как noise — нет сигнатур. Поддерживается sing-box. Используй когда другие протоколы режутся в CN-mainland.',
+      'Mieru от enfein, современный stealth-протокол с агрессивным паддингом, разработан против Chinese GFW. Trafic выглядит как noise, нет сигнатур. Поддерживается sing-box. Используй когда другие протоколы режутся в CN-mainland.',
     dpiResistance: 5,
     speed: 3,
     apply: {
@@ -341,7 +341,12 @@ export function recipesForProtocol(protocol: ProtocolName): Recipe[] {
 export interface ValidationIssue {
   level: 'error' | 'warning' | 'info';
   field?: string;
-  message: string;
+  // Locale-agnostic key + interpolation args. The caller resolves to a
+  // string via i18n t(). Earlier this carried a pre-rendered RU-only
+  // `message`, which leaked Russian into the EN locale. Forms render with
+  // t(issue.key, issue.args ?? {}).
+  key: string;
+  args?: Record<string, string>;
 }
 
 export function validateXrayConfig(values: {
@@ -352,13 +357,14 @@ export function validateXrayConfig(values: {
   const issues: ValidationIssue[] = [];
 
   // Hard error: REALITY only works with raw/xhttp/grpc.
-  // Form already filters dropdown to these 3, but defensive — paste/import
+  // Form already filters dropdown to these 3, but defensive, paste/import
   // could carry an invalid value.
   if (!['raw', 'xhttp', 'grpc'].includes(values.xrayNetwork)) {
     issues.push({
       level: 'error',
       field: 'xrayNetwork',
-      message: `xray-core отвергнет config: REALITY supports only raw / xhttp / grpc, не "${values.xrayNetwork}"`,
+      key: 'validation.xray.networkInvalid',
+      args: { network: values.xrayNetwork },
     });
   }
 
@@ -367,16 +373,17 @@ export function validateXrayConfig(values: {
     issues.push({
       level: 'error',
       field: 'xrayFlow',
-      message: `Vision flow несовместим с ${values.xrayNetwork}. Поставь Flow = "(none)" или Network = "raw"`,
+      key: 'validation.xray.visionRequiresRaw',
+      args: { network: values.xrayNetwork },
     });
   }
 
-  // Warning: Trojan + Vision — Trojan не поддерживает Vision.
+  // Warning: Trojan + Vision, Trojan не поддерживает Vision.
   if (values.xraySubprotocol === 'trojan' && values.xrayFlow !== '') {
     issues.push({
       level: 'warning',
       field: 'xrayFlow',
-      message: 'Trojan не использует flow — поле будет проигнорировано на клиенте',
+      key: 'validation.xray.trojanIgnoresFlow',
     });
   }
 
@@ -384,8 +391,7 @@ export function validateXrayConfig(values: {
   if (values.xrayNetwork === 'raw' && values.xrayFlow === '') {
     issues.push({
       level: 'info',
-      message:
-        'Без Vision flow на raw transport теряется ~30% throughput из-за TLS-in-TLS. Рекомендуем добавить Vision если subprotocol=vless.',
+      key: 'validation.xray.rawWithoutVisionSlow',
     });
   }
 

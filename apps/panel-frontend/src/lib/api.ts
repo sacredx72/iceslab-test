@@ -19,7 +19,7 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// On 401 the token is bad/expired — clear the session AND drop the React
+// On 401 the token is bad/expired, clear the session AND drop the React
 // Query cache so the next admin signing in on the same browser doesn't
 // see the previous admin's user list / dashboard flash before refetch.
 api.interceptors.response.use(
@@ -38,7 +38,7 @@ api.interceptors.response.use(
 export interface AuthStatusResponse {
   authentication: { password: { enabled: boolean } };
   registration: { enabled: boolean };
-  /** Panel public URL + subscription path prefix — used by the SPA to
+  /** Panel public URL + subscription path prefix, used by the SPA to
    *  show admins the FULL copy-paste subscription URL on the user form,
    *  rather than just the path. Both come from backend env. */
   panel?: {
@@ -128,7 +128,7 @@ export interface User {
   telegramId: string | null;
   email: string | null;
   enabledProtocols: ProtocolName[];
-  /** Slice 26 — squads the user belongs to. Always includes ALL_SQUAD_ID. */
+  /** Slice 26, squads the user belongs to. Always includes ALL_SQUAD_ID. */
   groupIds: string[];
   createdAt: string;
   updatedAt: string;
@@ -152,7 +152,7 @@ export interface CreateUserInput {
   telegramId?: string | null;
   hwidDeviceLimit?: number | null;
   enabledProtocols?: ProtocolName[];
-  /** Slice 26 — squad membership. Empty/undefined → backend auto-adds to All. */
+  /** Slice 26, squad membership. Empty/undefined → backend auto-adds to All. */
   groupIds?: string[];
 }
 
@@ -167,7 +167,7 @@ export interface UpdateUserInput {
   telegramId?: string | null;
   hwidDeviceLimit?: number | null;
   enabledProtocols?: ProtocolName[];
-  /** Slice 26 — replaces the full squad set when provided. */
+  /** Slice 26, replaces the full squad set when provided. */
   groupIds?: string[];
 }
 
@@ -435,7 +435,7 @@ export interface XrayInboundConfig {
   path?: string;
   host?: string;
   serviceName?: string;
-  /** Slice 24c part 3 — `vless` (default) or `trojan` over the same REALITY
+  /** Slice 24c part 3, `vless` (default) or `trojan` over the same REALITY
    *  stack. Empty/undefined → server falls back to vless. */
   subprotocol?: 'vless' | 'trojan';
 }
@@ -452,7 +452,7 @@ export interface AmneziawgObfuscation {
   h2: number;
   h3: number;
   h4: number;
-  /** v2.0 mimicry packets (hex). Optional — Zod defaults empty. */
+  /** v2.0 mimicry packets (hex). Optional, Zod defaults empty. */
   i1?: string;
   i2?: string;
   i3?: string;
@@ -489,7 +489,7 @@ export interface Inbound {
   name: string;
   port: number;
   /** Override of the public host emitted in client URIs. NULL → fall back
-   *  to `node.address`. Slice 25 — separates control-plane endpoint from
+   *  to `node.address`. Slice 25, separates control-plane endpoint from
    *  client-facing FQDN. */
   publicHost: string | null;
   /** Override of the public port. NULL → use `port`. */
@@ -565,7 +565,7 @@ export async function testSrrRule(userAgent: string): Promise<TestSrrResponse> {
 // ───── Squads (slice 26) ─────
 
 /** Stable, well-known UUID of the system "All" squad. Mirrored from
- *  apps/panel-backend/src/modules/squads/squads.constants.ts — UI uses it
+ *  apps/panel-backend/src/modules/squads/squads.constants.ts, UI uses it
  *  to render the row as read-only (rename/delete is rejected backend-side). */
 export const ALL_SQUAD_ID = '00000000-0000-0000-0000-000000000001';
 
@@ -573,7 +573,7 @@ export interface Squad {
   id: string;
   name: string;
   description: string | null;
-  /** Slice 27 — squad ACL is profile-level. Renamed from inboundIds. */
+  /** Slice 27, squad ACL is profile-level. Renamed from inboundIds. */
   profileIds: string[];
   memberCount: number;
   createdAt: string;
@@ -860,7 +860,7 @@ export interface ApiToken {
   createdAt: string;
 }
 
-/** POST /api/api-tokens response — includes the plaintext token ONCE.
+/** POST /api/api-tokens response, includes the plaintext token ONCE.
  *  Panel never shows it again after this. */
 export interface CreatedApiToken extends ApiToken {
   /** Plaintext bearer token, e.g. `icp_AbC123...`. Copy it now. */
@@ -949,7 +949,7 @@ export interface DashboardOverview {
     process: {
       rssBytes: number;
       heapUsedBytes: number;
-      heapTotalBytes: number;
+      heapLimitBytes: number;
       uptimeSeconds: number;
     };
   };
@@ -992,7 +992,7 @@ export interface PublicSettings {
 }
 
 /** Full settings dump (admin-only). Includes subscription metadata
- *  (slice S1 — Profile-Title / Update-Interval / Support-URL / Announce). */
+ *  (slice S1, Profile-Title / Update-Interval / Support-URL / Announce). */
 export interface AdminSettings extends PublicSettings {
   subscriptionProfileTitle?: string | null;
   subscriptionUpdateIntervalHours?: number;
@@ -1008,14 +1008,14 @@ export interface UpdateSettingsInput {
   subscriptionAnnounceTemplate?: string | null;
 }
 
-/** Fetch public-flagged settings — no auth required. Used by LoginPage so
+/** Fetch public-flagged settings, no auth required. Used by LoginPage so
  *  the brand title shows correctly before sign-in. */
 export async function getPublicSettings(): Promise<PublicSettings> {
   const { data } = await api.get<PublicSettings>('/api/settings/public');
   return data;
 }
 
-/** Admin-only — full settings dump. */
+/** Admin-only, full settings dump. */
 export async function getSettings(): Promise<AdminSettings> {
   const { data } = await api.get<AdminSettings>('/api/settings');
   return data;
