@@ -20,13 +20,14 @@
 
 set -euo pipefail
 
+LIB_PREFIX="logs"
+# shellcheck source=_lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
+trap 'on_err $LINENO' ERR
+
 COMPOSE_FILE="docker-compose.prod.yml"
 ENV_FILE=".env.production"
-
-if [[ ! -f "$COMPOSE_FILE" || ! -f "$ENV_FILE" ]]; then
-    echo "[logs] run from panel project root (need $COMPOSE_FILE + $ENV_FILE)" >&2
-    exit 1
-fi
+require_compose_root
 
 DC=(docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE")
 
@@ -46,8 +47,12 @@ for arg in "$@"; do
         redis|cache)        SERVICE="redis" ;;
         -f|--follow|tail)   FOLLOW=1 ;;
         --tail=*)           TAIL_N="${arg#--tail=}" ;;
+        -h|--help)
+            sed -n '2,20p' "$0" | sed 's/^# \?//'
+            exit 0
+            ;;
         *)
-            echo "[logs] unknown arg: $arg (try: be / fe / caddy / db / redis / -f)" >&2
+            log_err "unknown arg: $arg (try: be / fe / caddy / db / redis / -f)"
             exit 2
             ;;
     esac
@@ -61,15 +66,15 @@ caddy_logs() {
     if [[ $FOLLOW -eq 1 ]]; then follow_flag="-f"; fi
     if command -v journalctl >/dev/null 2>&1; then
         journalctl -u caddy $follow_flag --no-pager -n "$TAIL_N" 2>/dev/null \
-            || echo "(caddy systemd unit not found — bare-IP install, skipping)"
+            || log_warn "caddy systemd unit not found — bare-IP install, skipping"
     else
-        echo "(journalctl not available — can't read caddy logs)"
+        log_warn "journalctl not available — can't read caddy logs"
     fi
 }
 
 if [[ "$SERVICE" == "caddy" ]]; then
     caddy_logs
-    exit $?
+    exit 0
 fi
 
 ARGS=(--tail="$TAIL_N")
@@ -85,18 +90,18 @@ fi
 # All-services mode — one block per service. Printing them grouped is
 # easier to skim than the interleaved default.
 for s in backend frontend postgres redis; do
-    echo "═══════════════════════════════════════════════════════════"
-    echo " $s (last $TAIL_N lines)"
-    echo "═══════════════════════════════════════════════════════════"
-    "${DC[@]}" logs --tail="$TAIL_N" "$s" 2>/dev/null || echo "(service '$s' not running)"
-    echo
+    printf '\n%b═══════════════════════════════════════════════════════════%b\n' "$C_INFO" "$C_RST"
+    printf '%b  %s%b %b(last %s lines)%b\n' "$C_INFO" "$s" "$C_RST" "$C_DIM" "$TAIL_N" "$C_RST"
+    printf '%b═══════════════════════════════════════════════════════════%b\n' "$C_INFO" "$C_RST"
+    "${DC[@]}" logs --tail="$TAIL_N" "$s" 2>/dev/null \
+        || log_warn "service '$s' not running"
 done
 
 # Caddy block at the end so even an all-services tail covers TLS
 # issues. Output stays empty + a friendly note when bare-IP mode skipped
 # the install.
-echo "═══════════════════════════════════════════════════════════"
-echo " caddy (systemd, last $TAIL_N lines)"
-echo "═══════════════════════════════════════════════════════════"
+printf '\n%b═══════════════════════════════════════════════════════════%b\n' "$C_INFO" "$C_RST"
+printf '%b  caddy%b %b(systemd, last %s lines)%b\n' "$C_INFO" "$C_RST" "$C_DIM" "$TAIL_N" "$C_RST"
+printf '%b═══════════════════════════════════════════════════════════%b\n' "$C_INFO" "$C_RST"
 caddy_logs
 echo
