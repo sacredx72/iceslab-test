@@ -79,7 +79,8 @@ export default {
   },
   nodes: {
     title: 'Nodes',
-    countOnline: '{{count}} nodes · {{online}} online',
+    countOnline_one: '{{count}} node · {{online}} online',
+    countOnline_other: '{{count}} nodes · {{online}} online',
     create: 'Create node',
     editTitle: 'Edit node',
     layoutCards: 'Cards',
@@ -669,7 +670,8 @@ export default {
 
   // ───── Iceslab redesign - new chrome keys (cycle #11+) ─────
   pageHero: {
-    usersEyebrow: '{{total}} accounts · {{online}} online{{limited}}',
+    usersEyebrow_one: '{{count}} account · {{online}} online{{limited}}',
+    usersEyebrow_other: '{{count}} accounts · {{online}} online{{limited}}',
     usersEyebrowLimited: ' · {{count}} limited',
     usersTitle: 'Users.',
     usersSubtitle:
@@ -735,7 +737,8 @@ export default {
     shortcutCreateBack: '⏎ Create · ← Back Edit params',
     shortcutBuiltin: 'Built-in · read-only',
     stepNext: 'Next: pick profiles →',
-    createWithBindings: 'Create node + {{count}} bindings',
+    createWithBindings_one: 'Create node + {{count}} binding',
+    createWithBindings_other: 'Create node + {{count}} bindings',
   },
 
   loginPage: {
@@ -909,6 +912,7 @@ export default {
   userStatus: {
     online: 'Online',
     offline: 'Offline',
+    active: 'Active',
     limited: 'Limited',
     expired: 'Expired',
     disabled: 'Disabled',

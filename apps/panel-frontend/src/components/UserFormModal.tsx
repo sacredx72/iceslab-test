@@ -307,8 +307,8 @@ export function UserFormModal({ opened, onClose, user, onSubmit, loading }: Prop
                   <Select
                     label={t('users.table.status')}
                     data={[
-                      { value: 'active', label: 'Active' },
-                      { value: 'disabled', label: 'Disabled' },
+                      { value: 'active', label: t('userStatus.active') },
+                      { value: 'disabled', label: t('userStatus.disabled') },
                     ]}
                     {...form.getInputProps('status')}
                   />
@@ -557,7 +557,7 @@ function ProfileHeader({ user, subUrl }: { user: User; subUrl: string }) {
                 {user.username}
               </Text>
               <Badge variant="light" color={STATUS_COLORS[user.status] ?? 'gray'} tt="uppercase">
-                {user.status}
+                {t(`userStatus.${user.status}`, { defaultValue: user.status })}
               </Badge>
             </Group>
             <Text size="xs" c="dimmed" ff="monospace">
