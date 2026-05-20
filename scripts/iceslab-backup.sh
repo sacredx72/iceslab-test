@@ -19,6 +19,11 @@
 
 set -euo pipefail
 
+LIB_PREFIX="backup"
+# shellcheck source=_lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
+trap 'on_err $LINENO' ERR
+
 # ───── Defaults ─────
 COMPOSE_FILE="docker-compose.prod.yml"
 ENV_FILE=".env.production"
@@ -48,26 +53,18 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         -h|--help)
-            sed -n '2,16p' "$0" | sed 's/^# \?//'
+            sed -n '2,18p' "$0" | sed 's/^# \?//'
             exit 0
             ;;
         *)
-            echo "unknown arg: $1" >&2
+            log_err "unknown arg: $1"
             exit 2
             ;;
     esac
 done
 
 # ───── Pre-flight ─────
-if [[ ! -f "$COMPOSE_FILE" ]]; then
-    echo "compose file not found: $COMPOSE_FILE" >&2
-    echo "run from the panel project root, or pass --compose-file" >&2
-    exit 1
-fi
-if [[ ! -f "$ENV_FILE" ]]; then
-    echo "env file not found: $ENV_FILE — run from the panel project root" >&2
-    exit 1
-fi
+require_compose_root
 
 mkdir -p "$OUT_DIR"
 
@@ -81,11 +78,11 @@ source <(grep -E '^(POSTGRES_USER|POSTGRES_DB)=' "$ENV_FILE")
 # DB is the most common mistake when this is wired into a cron the night
 # after a deploy that never finished.
 if ! docker ps --format '{{.Names}}' | grep -q "^${POSTGRES_CONTAINER}$"; then
-    echo "container ${POSTGRES_CONTAINER} is not running" >&2
+    log_err "container ${POSTGRES_CONTAINER} is not running"
     exit 1
 fi
 if ! docker ps --format '{{.Names}}' | grep -q "^${REDIS_CONTAINER}$"; then
-    echo "container ${REDIS_CONTAINER} is not running" >&2
+    log_err "container ${REDIS_CONTAINER} is not running"
     exit 1
 fi
 
@@ -93,27 +90,48 @@ fi
 TS="$(date -u +%Y%m%dT%H%M%SZ)"
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
+# Re-install the ERR trap — EXIT trap above replaced the one set by _lib.
+trap 'on_err $LINENO' ERR
 
-echo "[backup] postgres → ${STAGE}/postgres.sql"
+STEP_TOTAL=4
+
+# ───── Step 1: postgres dump ─────
+step 1 "postgres pg_dump → ${STAGE}/postgres.sql"
 docker exec -e PGPASSWORD -i "$POSTGRES_CONTAINER" \
     pg_dump --clean --if-exists --no-owner --no-privileges \
             -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
     > "${STAGE}/postgres.sql"
+log_info "  $(du -h "${STAGE}/postgres.sql" | cut -f1)"
+step_done
 
-echo "[backup] redis BGSAVE …"
+# ───── Step 2: redis BGSAVE + copy ─────
+step 2 "redis BGSAVE → ${STAGE}/redis.rdb"
 docker exec "$REDIS_CONTAINER" redis-cli BGSAVE >/dev/null
 # BGSAVE is async; wait for the timestamp on LASTSAVE to advance.
+# Previously this loop silently gave up after 30s and proceeded with
+# whatever rdb happened to be on disk — could ship a STALE snapshot.
+# Now we fail loudly so the operator knows the backup is no good.
 prev_lastsave="$(docker exec "$REDIS_CONTAINER" redis-cli LASTSAVE)"
+bgsave_ok=0
 for _ in $(seq 1 30); do
     sleep 1
     cur="$(docker exec "$REDIS_CONTAINER" redis-cli LASTSAVE)"
     if [[ "$cur" != "$prev_lastsave" ]]; then
+        bgsave_ok=1
         break
     fi
 done
+if [[ $bgsave_ok -ne 1 ]]; then
+    log_err "BGSAVE did not advance LASTSAVE within 30s — backup would be stale"
+    log_err "  check redis health: docker logs ${REDIS_CONTAINER} --tail=50"
+    exit 1
+fi
 docker cp "${REDIS_CONTAINER}:/data/dump.rdb" "${STAGE}/redis.rdb"
+log_info "  $(du -h "${STAGE}/redis.rdb" | cut -f1)"
+step_done
 
-echo "[backup] env → ${STAGE}/env"
+# ───── Step 3: env + manifest ─────
+step 3 "env file + manifest"
 cp "$ENV_FILE" "${STAGE}/env"
 
 # Pack the manifest so restore can sanity-check what it's about to overwrite.
@@ -127,11 +145,13 @@ cat > "${STAGE}/manifest.json" <<EOF
   "components": ["postgres.sql", "redis.rdb", "env"]
 }
 EOF
+step_done
 
-# ───── Tar + optional encryption ─────
+# ───── Step 4: tar + optional encryption ─────
 ARCHIVE="${OUT_DIR}/iceslab-backup-${TS}.tar.gz"
 
 if [[ -n "$PASSWORD" ]]; then
+    step 4 "tar + AES-256-CBC encrypt → ${ARCHIVE}.enc"
     ENCRYPTED="${ARCHIVE}.enc"
     tar -C "$STAGE" -czf - postgres.sql redis.rdb env manifest.json \
         | openssl enc -aes-256-cbc -salt -pbkdf2 -iter 200000 \
@@ -139,12 +159,17 @@ if [[ -n "$PASSWORD" ]]; then
                        -out "$ENCRYPTED"
     chmod 600 "$ENCRYPTED"
     SIZE="$(du -h "$ENCRYPTED" | cut -f1)"
-    echo "[backup] done: ${ENCRYPTED} (${SIZE}, AES-256-CBC)"
+    step_done
+    echo
+    log_ok "backup complete in $(elapsed_total): ${ENCRYPTED} (${SIZE}, AES-256-CBC)"
 else
+    step 4 "tar → ${ARCHIVE}"
     tar -C "$STAGE" -czf "$ARCHIVE" postgres.sql redis.rdb env manifest.json
     chmod 600 "$ARCHIVE"
     SIZE="$(du -h "$ARCHIVE" | cut -f1)"
-    echo "[backup] done: ${ARCHIVE} (${SIZE}, unencrypted)"
-    echo "[backup] WARN: archive contains JWT_SECRET + DB password + CA private key" >&2
-    echo "[backup] WARN: encrypt with --password before storing off-host" >&2
+    step_done
+    echo
+    log_ok "backup complete in $(elapsed_total): ${ARCHIVE} (${SIZE}, unencrypted)"
+    log_warn "archive contains JWT_SECRET + DB password + CA private key"
+    log_warn "encrypt with --password before storing off-host"
 fi
