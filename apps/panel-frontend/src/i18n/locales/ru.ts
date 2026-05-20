@@ -81,7 +81,10 @@ export default {
   },
   nodes: {
     title: 'Ноды',
-    countOnline: '{{count}} нод · {{online}} онлайн',
+    countOnline_one: '{{count}} нода · {{online}} онлайн',
+    countOnline_few: '{{count}} ноды · {{online}} онлайн',
+    countOnline_many: '{{count}} нод · {{online}} онлайн',
+    countOnline_other: '{{count}} ноды · {{online}} онлайн',
     create: 'Создать ноду',
     editTitle: 'Редактировать ноду',
     layoutCards: 'Карточки',
@@ -399,20 +402,20 @@ export default {
       expireDaysDesc: 'Оставь пустым - без срока',
       email: 'Email',
       telegramId: 'Telegram ID',
-      telegramIdPlaceholder: 'optional',
+      telegramIdPlaceholder: 'необязательно',
       hwidLimit: 'Лимит HWID-устройств',
       hwidLimitDesc:
-        'Оставь пустым - без ограничения. Учитывается только для клиентов отправляющих x-hwid header (Hiddify, Streisand, Happ).',
+        'Оставь пустым, без ограничения. Учитывается только для клиентов, отправляющих x-hwid header (Hiddify, Streisand, Happ).',
       tag: 'Тег',
       tagPlaceholder: 'vip / trial / ...',
       description: 'Описание',
       descriptionPlaceholder: 'Внутренняя заметка',
       squadsDesc:
-        'В каких squad\'ах состоит пользователь. «All» - system-managed fallback (auto-add только если не выбран ни один другой squad).',
+        'В какие сквады входит пользователь. «All» — системная группа по умолчанию (добавится автоматически, если не выбран ни один другой сквад).',
       devicesTitle: 'Зарегистрированные устройства ({{count}})',
       devicesEmpty: 'Юзер ещё не подключался с HWID-aware клиента, либо лимит не задан.',
-      deviceDelete: 'Сбросить слот - юзер сможет залогиниться с другого устройства',
-      deviceLastSeen: 'last seen: {{when}}',
+      deviceDelete: 'Сбросить слот, чтобы юзер мог подключиться с другого устройства',
+      deviceLastSeen: 'видели: {{when}}',
       submitCreate: 'Создать',
       submitEdit: 'Сохранить',
     },
@@ -673,7 +676,10 @@ export default {
 
   // ───── Iceslab redesign - new chrome keys (cycle #11+) ─────
   pageHero: {
-    usersEyebrow: '{{total}} аккаунтов · {{online}} онлайн{{limited}}',
+    usersEyebrow_one: '{{count}} аккаунт · {{online}} онлайн{{limited}}',
+    usersEyebrow_few: '{{count}} аккаунта · {{online}} онлайн{{limited}}',
+    usersEyebrow_many: '{{count}} аккаунтов · {{online}} онлайн{{limited}}',
+    usersEyebrow_other: '{{count}} аккаунта · {{online}} онлайн{{limited}}',
     usersEyebrowLimited: ' · {{count}} ограничено',
     usersTitle: 'Пользователи.',
     usersSubtitle:
@@ -723,8 +729,8 @@ export default {
 
   modal: {
     userNewTitle: 'Новый пользователь',
-    userNewSubtitle: 'Subscription-токен + креды зачеканятся при сохранении',
-    userEditSubtitle: 'Редактирование · изменения сохраняются на коммит',
+    userNewSubtitle: 'Subscription-токен и креды сгенерируются при сохранении',
+    userEditSubtitle: 'Редактирование пользователя',
     nodeNewTitle: 'Новая нода',
     nodeNewSubtitle: 'Зарегистрировать VPS · мастер из 2 шагов',
     profileNewTitle: 'Новый профиль',
@@ -739,7 +745,10 @@ export default {
     shortcutCreateBack: '⏎ Создать · ← Назад править параметры',
     shortcutBuiltin: 'Системный · только чтение',
     stepNext: 'Дальше: выбрать профили →',
-    createWithBindings: 'Создать ноду + {{count}} bindings',
+    createWithBindings_one: 'Создать ноду + {{count}} привязка',
+    createWithBindings_few: 'Создать ноду + {{count}} привязки',
+    createWithBindings_many: 'Создать ноду + {{count}} привязок',
+    createWithBindings_other: 'Создать ноду + {{count}} привязки',
   },
 
   loginPage: {
@@ -912,6 +921,7 @@ export default {
   userStatus: {
     online: 'Онлайн',
     offline: 'Офлайн',
+    active: 'Активен',
     limited: 'Ограничен',
     expired: 'Истёк',
     disabled: 'Отключён',
