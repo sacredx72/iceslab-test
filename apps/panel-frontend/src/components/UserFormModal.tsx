@@ -883,6 +883,16 @@ function DirectEndpointRow({
       ? t('userForm.copyUri')
       : t('userForm.copyWgconfHint');
 
+  // mtg is single-secret upstream — every user of the inbound shares the
+  // same wire identity, so per-user byte accounting is architecturally
+  // impossible. The traffic counter and lastOnlineAt for MTProto-only
+  // users will both look like the user never connected. Surface that
+  // honestly with a small note so admins don't suspect a bug. (Panel-
+  // side fallback in stats.cron.ts treats adapter-tracked presence as
+  // "online", so the OFFLINE-forever bug is gone, but per-user TRAFFIC
+  // counters remain at zero and per-user quotas don't apply.)
+  const isMtproto = endpoint.protocol.toLowerCase() === 'mtproto';
+
   return (
     <Paper withBorder p="xs" radius="sm" style={{ overflow: 'hidden' }}>
       <Group justify="space-between" wrap="nowrap" gap="xs">
@@ -894,18 +904,27 @@ function DirectEndpointRow({
             {endpoint.nodeName} · {endpoint.host}:{endpoint.port}
           </Text>
         </Group>
-        <Tooltip label={tooltipLabel} multiline w={260}>
-          <ActionIcon
-            variant="light"
-            size="sm"
-            onClick={handleCopy}
-            color={copied ? 'green' : hasUri ? 'blue' : 'grape'}
-            style={{ flexShrink: 0 }}
-            disabled={!hasUri && !wgconfUrl}
-          >
-            {copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
-          </ActionIcon>
-        </Tooltip>
+        <Group gap={4} wrap="nowrap">
+          {isMtproto && (
+            <Tooltip label={t('userForm.mtprotoNoPerUserStats')} multiline w={280} position="left">
+              <Badge variant="light" color="yellow" size="xs" style={{ cursor: 'help' }}>
+                ⓘ
+              </Badge>
+            </Tooltip>
+          )}
+          <Tooltip label={tooltipLabel} multiline w={260}>
+            <ActionIcon
+              variant="light"
+              size="sm"
+              onClick={handleCopy}
+              color={copied ? 'green' : hasUri ? 'blue' : 'grape'}
+              style={{ flexShrink: 0 }}
+              disabled={!hasUri && !wgconfUrl}
+            >
+              {copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
+            </ActionIcon>
+          </Tooltip>
+        </Group>
       </Group>
     </Paper>
   );
