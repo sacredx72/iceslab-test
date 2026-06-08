@@ -7,10 +7,18 @@ import { readCachedNodeMetrics } from '../nodes/nodes.cron.js';
 // Dashboard overview is hit by every admin's browser every 10s. The aggregates
 // (groupBy on NodeUsageHistory + UserTraffic counts) cost a few hundred ms
 // each tick; cache the assembled DTO for 8s so 5 admins refreshing in unison
-// pay only one round of SQL. TTL < frontend interval so worst-case staleness
-// is bounded by polling cadence + a few seconds.
+// pay only one round of SQL.
+//
+// TTL is deliberately >= the frontend poll cadence (DashboardPage 10s,
+// AppLayout 30s). At 8s the cache expired before almost every poll, so the
+// expensive ~20-query recompute (userMetrics + 7×traffic + nodes + protocols
+// + topUsers + events + host sample) ran every ~10s and pegged 1-vCPU hosts
+// to a visible burst. At 30s the recompute runs at most twice a minute no
+// matter how many tabs poll; clients in between get warm cache. Staleness
+// bound (30s) is fine for an operator dashboard — node status has its own
+// 30s cron and traffic counters are cumulative.
 const OVERVIEW_CACHE_KEY = 'dashboard:overview:v1';
-const OVERVIEW_CACHE_TTL_SECONDS = 8;
+const OVERVIEW_CACHE_TTL_SECONDS = 30;
 
 const ONLINE_NOW_WINDOW_MS = 3 * 60 * 1000;
 const TOP_USERS_LIMIT = 5;

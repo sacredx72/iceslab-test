@@ -60,8 +60,11 @@ function takeCpuSnapshot(): CpuSnapshot {
 }
 
 async function sampleCpuPercent(): Promise<number> {
+  // 500ms window (was 200ms): a wider delta is less jittery on low-core
+  // hosts. This sample is secondary detail now — the UI headlines the
+  // load-average %; the extra 300ms is hidden behind the 30s overview cache.
   const a = takeCpuSnapshot();
-  await new Promise((r) => setTimeout(r, 200));
+  await new Promise((r) => setTimeout(r, 500));
   const b = takeCpuSnapshot();
   const idleDelta = b.idle - a.idle;
   const totalDelta = b.total - a.total;

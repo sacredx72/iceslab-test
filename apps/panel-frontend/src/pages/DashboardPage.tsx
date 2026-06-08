@@ -697,7 +697,13 @@ function DashboardContent({ data }: { data: DashboardOverview }) {
 
 function SystemHealth({ host }: { host: DashboardOverview['host'] }) {
   const { t } = useTranslation();
-  const cpuPct = host.cpu.samplePercent;
+  // Headline = load-average-derived % (1-min, smoothed), not the 200ms
+  // instantaneous sample. The sample is taken while the backend builds the
+  // dashboard (parallel SQL burst), so on a 1-vCPU host it measures its own
+  // work and spikes to 80%+ — misleading. loadPercent reflects sustained
+  // busy-ness. Fall back to the sample where loadavg is unavailable (Windows
+  // returns 0,0,0 → loadPercent null).
+  const cpuPct = host.cpu.loadPercent ?? host.cpu.samplePercent;
   const cpuColor = thresholdColor(cpuPct);
   const memColor = thresholdColor(host.memory.usedPercent, 75, 90);
   const diskColor = host.disk ? thresholdColor(host.disk.usedPercent, 80, 90) : MIST;
