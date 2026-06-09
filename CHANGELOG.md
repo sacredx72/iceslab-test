@@ -3,6 +3,42 @@
 All notable changes to Iceslab are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are git tags.
 
+## v0.1.3
+
+Subscription self-service for end users, plus a dashboard CPU-reporting fix
+and an ops-script papercut.
+
+### Added
+
+- **Human-readable subscription page.** Opening `/sub/<token>` in a browser
+  used to dump raw base64 ([#1](https://github.com/icecompany-tech/iceslab/issues/1)).
+  It now serves a self-contained landing page: status (traffic / expiry /
+  protocols), a copy-able subscription link, deep-link import buttons
+  (Hiddify / Streisand / v2rayNG / Clash), and per-format download buttons
+  including the AmneziaWG `.conf`. RU/EN by Accept-Language. VPN clients are
+  unaffected (an explicit `?format=` always wins).
+- **QR codes on the subscription page.** One QR for the subscription URL
+  (scan to import in proxy clients) and, when an AmneziaWG endpoint exists, a
+  QR of the wg-quick config text (scan straight into AmneziaVPN). Generated
+  server-side as inline SVG via `qrcode-svg` (zero external requests).
+
+### Fixed
+
+- **Dashboard CPU headline.** The host CPU card showed a 200ms instantaneous
+  sample taken while the backend builds the overview, so a 1-vCPU host saw
+  its own work as an 80%+ spike. The headline now uses the 1-minute
+  load-average percentage (sustained busy-ness); the sample stays as
+  secondary detail.
+- **Ops scripts run from anywhere.** `deploy.sh` / `restore.sh` / etc. errored
+  when run from `scripts/` instead of the project root. They now auto-resolve
+  the root, so `cd scripts && ./deploy.sh` works too.
+
+### Performance
+
+- **Dashboard overview cache TTL 8s → 30s.** At 8s the cache expired before
+  almost every poll, so the ~20-query recompute ran every ~10s and pegged
+  small hosts. Now throttled to at most twice a minute regardless of tab count.
+
 ## v0.1.2
 
 Stabilization release: security hardening across the node-agent and installers,
