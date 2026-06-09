@@ -186,6 +186,7 @@ export default {
       bindingPortUpdateFailed: 'Не получилось сменить порт',
       bindingPortSave: 'Сохранить порт',
       bindingPortAgentConflict: 'Конфликт: порт {{port}} уже занят node-agent. Биндинг не запустится.',
+      bindingPortBindingConflict: 'Конфликт: порт {{port}} уже занят другим биндингом на этой ноде.',
     },
     cardSummary: '{{count}} bindings · {{bytes}} сегодня',
     regionFilterAll: 'Все регионы',

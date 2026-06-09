@@ -660,12 +660,24 @@ export function NodeEditModal({
                             const effectivePort = draft ?? binding.port;
                             const conflictsWithAgent =
                               nodeAgentPort !== null && effectivePort === nodeAgentPort;
+                            // Bug #11: also reject a port already used by ANOTHER
+                            // binding on this node (same (node, port) -> EADDRINUSE
+                            // at adapter start), not just the node-agent port.
+                            const conflictsWithBinding = bindingsWithProfile.some(
+                              (bp) =>
+                                bp.binding.id !== binding.id &&
+                                bp.binding.port === effectivePort,
+                            );
+                            const conflict = conflictsWithAgent || conflictsWithBinding;
+                            const conflictLabel = conflictsWithAgent
+                              ? t('nodes.edit.bindingPortAgentConflict', { port: nodeAgentPort })
+                              : t('nodes.edit.bindingPortBindingConflict', { port: effectivePort });
                             return (
                           <Group gap={2} wrap="nowrap">
                             <Text size="xs" c="dimmed" ff="monospace">:</Text>
                             <Tooltip
-                              label={t('nodes.edit.bindingPortAgentConflict', { port: nodeAgentPort })}
-                              disabled={!conflictsWithAgent}
+                              label={conflictLabel}
+                              disabled={!conflict}
                               color="red"
                             >
                               <NumberInput
@@ -674,7 +686,7 @@ export function NodeEditModal({
                                 min={1}
                                 max={65535}
                                 hideControls
-                                error={conflictsWithAgent}
+                                error={conflict}
                                 value={portDrafts[binding.id] ?? binding.port}
                                 onChange={(v) =>
                                   setPortDrafts((d) => ({
@@ -687,7 +699,7 @@ export function NodeEditModal({
                             </Tooltip>
                             {portDrafts[binding.id] !== undefined &&
                               portDrafts[binding.id] !== binding.port &&
-                              !conflictsWithAgent && (
+                              !conflict && (
                                 <Tooltip label={t('nodes.edit.bindingPortSave')}>
                                   <ActionIcon
                                     size="sm"

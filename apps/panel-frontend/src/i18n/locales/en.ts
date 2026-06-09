@@ -182,6 +182,7 @@ export default {
       bindingPortUpdateFailed: 'Port update failed',
       bindingPortSave: 'Save port',
       bindingPortAgentConflict: 'Conflict: port {{port}} is the node-agent mTLS listener. Binding will fail to start.',
+      bindingPortBindingConflict: 'Conflict: port {{port}} is already used by another binding on this node.',
     },
     cardSummary: '{{count}} bindings · {{bytes}} today',
     regionFilterAll: 'All regions',
