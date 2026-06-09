@@ -135,11 +135,23 @@ on_err() {
 require_compose_root() {
     local compose="${COMPOSE_FILE:-docker-compose.prod.yml}"
     local env="${ENV_FILE:-.env.production}"
-    if [[ ! -f "$compose" || ! -f "$env" ]]; then
-        log_err "run from panel project root — missing $compose or $env"
-        log_err "  (try: cd /opt/iceslab)"
-        exit 1
+    if [[ -f "$compose" && -f "$env" ]]; then
+        return 0
     fi
+    # Not in the project root. Operators naturally `cd scripts && ./deploy.sh`;
+    # auto-resolve to the dir above this lib (scripts/.. == project root) and
+    # re-check, so the ops scripts work from either location instead of just
+    # erroring out. Caught live 2026-06-09: deploy run from /opt/iceslab/scripts.
+    local root
+    root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)" || root=""
+    if [[ -n "$root" && -f "$root/$compose" && -f "$root/$env" ]]; then
+        cd "$root"
+        log_info "switched to project root: $root"
+        return 0
+    fi
+    log_err "run from panel project root — missing $compose or $env"
+    log_err "  (try: cd /opt/iceslab)"
+    exit 1
 }
 
 # ───── Git helpers ─────
