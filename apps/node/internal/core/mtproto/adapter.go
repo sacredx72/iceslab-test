@@ -57,11 +57,17 @@ type Adapter struct {
 	cfg    Config
 	logger *slog.Logger
 
+	// mu protects in-memory state; held only for fast ops. The slow render +
+	// subprocess Stop/Start runs under restartMu so Healthy()/GetStats don't
+	// block behind a restart. Bug #1.
 	mu      sync.Mutex
 	users   map[string]struct{} // userIDs that the panel has assigned to this inbound
 	started bool
 
 	proc *subprocess.Subprocess
+
+	// restartMu serializes regenerateAndRestart; never held with mu across IO.
+	restartMu sync.Mutex
 }
 
 func New(cfg Config, logger *slog.Logger) *Adapter {
@@ -91,12 +97,13 @@ func (a *Adapter) Name() string { return Name }
 // mtg. If either is empty, defers — first ApplyInbound activates it.
 func (a *Adapter) Start(ctx context.Context) error {
 	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.cfg.Inbound.Domain == "" || a.cfg.Inbound.Secret == "" {
+	notReady := a.cfg.Inbound.Domain == "" || a.cfg.Inbound.Secret == ""
+	a.mu.Unlock()
+	if notReady {
 		a.logger.Info("mtproto adapter: domain or secret not set — waiting for ApplyInbound from panel")
 		return nil
 	}
-	return a.regenerateAndRestartLocked(ctx)
+	return a.regenerateAndRestart(ctx)
 }
 
 func (a *Adapter) Stop(ctx context.Context) error {
@@ -160,8 +167,6 @@ func (a *Adapter) ApplyInbound(port int, rawCfg json.RawMessage) error {
 	}
 
 	a.mu.Lock()
-	defer a.mu.Unlock()
-
 	effectivePort := port
 	if effectivePort == 0 {
 		effectivePort = a.cfg.Inbound.ListenPort
@@ -169,6 +174,7 @@ func (a *Adapter) ApplyInbound(port int, rawCfg json.RawMessage) error {
 	if a.cfg.Inbound.Domain == wire.Domain &&
 		a.cfg.Inbound.Secret == wire.Secret &&
 		a.cfg.Inbound.ListenPort == effectivePort {
+		a.mu.Unlock()
 		a.logger.Info("mtproto ApplyInbound: config unchanged, skipping")
 		return nil
 	}
@@ -178,9 +184,11 @@ func (a *Adapter) ApplyInbound(port int, rawCfg json.RawMessage) error {
 	if effectivePort != 0 {
 		a.cfg.Inbound.ListenPort = effectivePort
 	}
+	newPort := a.cfg.Inbound.ListenPort
+	a.mu.Unlock()
 	a.logger.Info("mtproto ApplyInbound: config changed, regenerating + restarting",
-		"domain", wire.Domain, "port", a.cfg.Inbound.ListenPort)
-	return a.regenerateAndRestartLocked(context.Background())
+		"domain", wire.Domain, "port", newPort)
+	return a.regenerateAndRestart(context.Background())
 }
 
 // GetStats returns tracked users with zero per-user counters plus
@@ -293,39 +301,61 @@ func (a *Adapter) Healthy() bool {
 // SIGHUP-based hot reload for the secret — restart on every config
 // change. Domain changes are infrequent (admin-driven) so the
 // brief downtime is acceptable.
-func (a *Adapter) regenerateAndRestartLocked(ctx context.Context) error {
-	blob, err := renderConfig(a.cfg.Inbound)
+// regenerateAndRestart renders config + (re)starts mtg. Bug #1: must NOT be
+// called with a.mu held. restartMu serializes restarts; a.mu is taken only for
+// the snapshot + final proc swap so Healthy()/GetStats don't block behind the
+// multi-second Stop/Start.
+func (a *Adapter) regenerateAndRestart(ctx context.Context) error {
+	a.restartMu.Lock()
+	defer a.restartMu.Unlock()
+
+	a.mu.Lock()
+	inbound := a.cfg.Inbound
+	cfgPath := a.cfg.ConfigPath
+	binPath := a.cfg.BinaryPath
+	a.mu.Unlock()
+
+	blob, err := renderConfig(inbound)
 	if err != nil {
 		return fmt.Errorf("render mtproto config: %w", err)
 	}
-	if a.cfg.ConfigPath != "" {
-		if err := writeConfig(a.cfg.ConfigPath, blob); err != nil {
+	if cfgPath != "" {
+		if err := writeConfig(cfgPath, blob); err != nil {
 			return err
 		}
 	}
-	if a.cfg.BinaryPath == "" {
+	if binPath == "" {
+		a.mu.Lock()
 		a.started = true
+		a.mu.Unlock()
 		a.logger.Info("mtproto config written (config-only mode)")
 		return nil
 	}
 
 	// Restart cleanly — there's no graceful reload path in mtg for the
 	// secret. ~1s downtime is fine; users' clients reconnect.
-	if a.proc != nil {
-		_ = a.proc.Stop(ctx)
-		a.proc = nil
+	a.mu.Lock()
+	old := a.proc
+	a.mu.Unlock()
+	if old != nil {
+		_ = old.Stop(ctx)
 	}
 	proc := subprocess.New(subprocess.Config{
 		Name:   Name,
-		Binary: a.cfg.BinaryPath,
-		Args:   []string{"run", a.cfg.ConfigPath},
+		Binary: binPath,
+		Args:   []string{"run", cfgPath},
 		Logger: a.logger,
 	})
 	if err := proc.Start(ctx); err != nil {
+		a.mu.Lock()
+		a.proc = nil
+		a.mu.Unlock()
 		return fmt.Errorf("start mtg: %w", err)
 	}
+	a.mu.Lock()
 	a.proc = proc
 	a.started = true
-	a.logger.Info("mtproto (mtg) (re)started", "domain", a.cfg.Inbound.Domain)
+	a.mu.Unlock()
+	a.logger.Info("mtproto (mtg) (re)started", "domain", inbound.Domain)
 	return nil
 }

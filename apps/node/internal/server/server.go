@@ -376,8 +376,22 @@ func (s *Server) handleApplyInbounds(w http.ResponseWriter, r *http.Request) {
 		// (it only opens 443/1234/conventional). Idempotent: ufw skips
 		// already-existing rules silently. Per-protocol UDP vs TCP from
 		// protoForInbound() — keeps in lockstep with install-iceslab-node.sh.
-		for _, proto := range protoForInbound(ib.Protocol) {
-			firewall.Allow(r.Context(), s.logger, ib.Port, proto)
+		//
+		// Bug #9: when ib.Port == 0 (legacy pre-slice-50 push), the adapter
+		// falls back to its install-time ListenPort, but the server can't see
+		// that port, so firewall.Allow(0) is a no-op and the real port may
+		// have no UFW rule. The current panel always sends a concrete port, so
+		// this is a defensive log: surface it loudly instead of silently
+		// leaving the firewall closed for that inbound.
+		if ib.Port == 0 {
+			s.logger.Warn("applyInbounds: inbound has port=0 (legacy push); "+
+				"firewall rule NOT opened automatically, open the adapter's "+
+				"install-time port manually if clients can't connect",
+				"protocol", ib.Protocol, "inboundId", ib.ID)
+		} else {
+			for _, proto := range protoForInbound(ib.Protocol) {
+				firewall.Allow(r.Context(), s.logger, ib.Port, proto)
+			}
 		}
 		applied++
 	}

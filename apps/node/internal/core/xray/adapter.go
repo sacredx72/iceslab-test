@@ -46,11 +46,19 @@ type Adapter struct {
 	cfg    Config
 	logger *slog.Logger
 
+	// mu protects in-memory state (users, cfg.Inbound, proc, started). Held
+	// ONLY for fast ops. The slow config-render + subprocess Stop/Start runs
+	// under restartMu, so Healthy()/GetStats (which take mu briefly) never
+	// block behind a multi-second restart. Bug #1.
 	mu      sync.Mutex
 	users   map[string]xrayClient // key: userId
 	started bool                  // set true after first successful regenerateAndRestart
 
 	proc *subprocess.Subprocess
+
+	// restartMu serializes regenerateAndRestart so concurrent config changes
+	// can't race the subprocess swap. Never held together with mu across IO.
+	restartMu sync.Mutex
 }
 
 // New builds an adapter; nothing is spawned until Start is called.
@@ -76,12 +84,13 @@ func (a *Adapter) Name() string { return Name }
 // is a no-op — the adapter will activate on the first ApplyInbound call.
 func (a *Adapter) Start(ctx context.Context) error {
 	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.cfg.Inbound.RealityPrivateKey == "" {
+	noKey := a.cfg.Inbound.RealityPrivateKey == ""
+	a.mu.Unlock()
+	if noKey {
 		a.logger.Info("xray adapter: no REALITY key yet — waiting for ApplyInbound from panel")
 		return nil
 	}
-	return a.regenerateAndRestartLocked(ctx)
+	return a.regenerateAndRestart(ctx)
 }
 
 // Stop terminates the subprocess. The on-disk config is left in place.
@@ -108,8 +117,6 @@ func (a *Adapter) AddUser(user core.User) error {
 		return nil
 	}
 	a.mu.Lock()
-	defer a.mu.Unlock()
-
 	existing, exists := a.users[user.UserID]
 	// Empty flow is intentional for xhttp/ws/grpc/kcp/httpupgrade — Vision
 	// only works with raw (TCP). Earlier versions silently coerced empty to
@@ -122,22 +129,25 @@ func (a *Adapter) AddUser(user core.User) error {
 		Flow:  a.cfg.Inbound.Flow,
 	}
 	if exists && existing == desired {
+		a.mu.Unlock()
 		return nil
 	}
 	a.users[user.UserID] = desired
-	return a.regenerateAndRestartLocked(context.Background())
+	a.mu.Unlock()
+	return a.regenerateAndRestart(context.Background())
 }
 
 // RemoveUser drops the user from the state, regenerates, and restarts.
 // Idempotent: removing an unknown user is a no-op.
 func (a *Adapter) RemoveUser(userID string) error {
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	if _, ok := a.users[userID]; !ok {
+		a.mu.Unlock()
 		return nil
 	}
 	delete(a.users, userID)
-	return a.regenerateAndRestartLocked(context.Background())
+	a.mu.Unlock()
+	return a.regenerateAndRestart(context.Background())
 }
 
 // GetStats reports per-user byte counters via Xray's StatsService.
@@ -276,23 +286,22 @@ func (a *Adapter) ApplyInbound(port int, rawCfg json.RawMessage) error {
 	}
 
 	a.mu.Lock()
-	defer a.mu.Unlock()
-
 	// Idempotency check — same config → noop. Compare struct fields
 	// instead of byte-marshalling for speed; slice equality via reflect.
 	if inboundEqual(a.cfg.Inbound, newInbound) {
+		a.mu.Unlock()
 		a.logger.Info("xray ApplyInbound: config unchanged, skipping restart")
 		return nil
 	}
-
 	a.cfg.Inbound = newInbound
+	a.mu.Unlock()
 	a.logger.Info("xray ApplyInbound: config changed, regenerating and restarting",
 		"sni", wire.RealityServerNames, "shortIds", len(wire.RealityShortIDs))
 
 	// Use background context for the restart — the request that triggered
 	// this call may have a short deadline and we want xray to keep coming
 	// back up even if the caller times out.
-	return a.regenerateAndRestartLocked(context.Background())
+	return a.regenerateAndRestart(context.Background())
 }
 
 func inboundEqual(a, b InboundConfig) bool {
@@ -330,46 +339,70 @@ func stringSliceEqual(a, b []string) bool {
 	return true
 }
 
-// regenerateAndRestartLocked must be called with a.mu held. It writes the
-// current users-map to ConfigPath and (re)starts the xray subprocess.
-func (a *Adapter) regenerateAndRestartLocked(ctx context.Context) error {
+// regenerateAndRestart renders the current users-map to ConfigPath and
+// (re)starts the xray subprocess. Bug #1: it must NOT be called with a.mu
+// held. restartMu serializes restarts; a.mu is taken only for the fast
+// snapshot of state and the final proc swap, so Healthy()/GetStats never
+// block behind the multi-second Stop/Start.
+func (a *Adapter) regenerateAndRestart(ctx context.Context) error {
+	a.restartMu.Lock()
+	defer a.restartMu.Unlock()
+
+	// Snapshot the inputs under a.mu (fast), then do all IO with a.mu free.
+	a.mu.Lock()
 	clients := sortedClients(a.users)
-	blob, err := renderConfig(a.cfg.Inbound, clients)
+	inbound := a.cfg.Inbound
+	cfgPath := a.cfg.ConfigPath
+	binPath := a.cfg.BinaryPath
+	a.mu.Unlock()
+
+	blob, err := renderConfig(inbound, clients)
 	if err != nil {
 		return fmt.Errorf("render xray config: %w", err)
 	}
-	if a.cfg.ConfigPath != "" {
-		if err := writeConfig(a.cfg.ConfigPath, blob); err != nil {
+	if cfgPath != "" {
+		if err := writeConfig(cfgPath, blob); err != nil {
 			return err
 		}
 	}
 
-	if a.cfg.BinaryPath == "" {
+	if binPath == "" {
 		// Config-only mode: nothing more to do.
-		a.logger.Info("xray config written (config-only mode)", "users", len(clients))
+		a.mu.Lock()
 		a.started = true
+		a.mu.Unlock()
+		a.logger.Info("xray config written (config-only mode)", "users", len(clients))
 		return nil
 	}
 
-	// Stop existing subprocess if running.
-	if a.proc != nil {
-		if err := a.proc.Stop(ctx); err != nil {
+	// Stop the existing subprocess (keep the field pointing at it so Healthy
+	// reflects "down" during the swap; xray binds a fixed port so old must
+	// stop before new can bind).
+	a.mu.Lock()
+	old := a.proc
+	a.mu.Unlock()
+	if old != nil {
+		if err := old.Stop(ctx); err != nil {
 			a.logger.Warn("xray stop failed during restart", "err", err)
 		}
-		a.proc = nil
 	}
 
 	proc := subprocess.New(subprocess.Config{
 		Name:   Name,
-		Binary: a.cfg.BinaryPath,
-		Args:   []string{"run", "-c", a.cfg.ConfigPath},
+		Binary: binPath,
+		Args:   []string{"run", "-c", cfgPath},
 		Logger: a.logger,
 	})
 	if err := proc.Start(ctx); err != nil {
+		a.mu.Lock()
+		a.proc = nil
+		a.mu.Unlock()
 		return fmt.Errorf("start xray: %w", err)
 	}
+	a.mu.Lock()
 	a.proc = proc
 	a.started = true
+	a.mu.Unlock()
 	a.logger.Info("xray (re)started", "users", len(clients))
 	return nil
 }

@@ -30,20 +30,29 @@ func (a *Adapter) startAuthCallback() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc(a.cfg.AuthCallbackPath, a.handleAuthCallback)
 
-	a.callbackSrv = &http.Server{
+	// Bug #2: a.callbackSrv is read by Healthy() under a.mu.RLock, so its
+	// writes must be guarded too (start/stopAuthCallback run OUTSIDE a.mu, so
+	// locking here is deadlock-free). Build into a local, assign under the
+	// lock, then use the local for the slow listen/Serve so we never touch the
+	// shared field outside the lock.
+	srv := &http.Server{
 		Addr:              fmt.Sprintf("%s:%d", a.cfg.AuthCallbackHost, a.cfg.AuthCallbackPort),
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	ln, err := listen(a.callbackSrv.Addr)
+	ln, err := listen(srv.Addr)
 	if err != nil {
 		return err
 	}
 
+	a.mu.Lock()
+	a.callbackSrv = srv
+	a.mu.Unlock()
+
 	go func() {
-		a.logger.Info("hysteria auth callback listening", "addr", a.callbackSrv.Addr)
-		if err := a.callbackSrv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		a.logger.Info("hysteria auth callback listening", "addr", srv.Addr)
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			a.logger.Error("hysteria auth callback failed", "err", err)
 		}
 	}()
@@ -51,14 +60,18 @@ func (a *Adapter) startAuthCallback() error {
 }
 
 func (a *Adapter) stopAuthCallback(ctx context.Context) error {
-	if a.callbackSrv == nil {
+	// Read + clear the shared field under the lock, then Shutdown the local
+	// copy outside it (Shutdown blocks up to 3s; don't hold a.mu across it).
+	a.mu.Lock()
+	srv := a.callbackSrv
+	a.callbackSrv = nil
+	a.mu.Unlock()
+	if srv == nil {
 		return nil
 	}
 	shutCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	err := a.callbackSrv.Shutdown(shutCtx)
-	a.callbackSrv = nil
-	return err
+	return srv.Shutdown(shutCtx)
 }
 
 func (a *Adapter) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
