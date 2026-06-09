@@ -38,9 +38,15 @@ type Adapter struct {
 	cfg    Config
 	logger *slog.Logger
 
+	// mu protects in-memory state; held only for fast ops. The slow render +
+	// `mita apply/reload` CLI runs under restartMu so Healthy()/GetStats don't
+	// block behind a reload. Bug #10.
 	mu      sync.Mutex
 	users   map[string]User // userId → User
 	started bool
+
+	// restartMu serializes regenerateAndReload; never held with mu across IO.
+	restartMu sync.Mutex
 }
 
 func New(cfg Config, logger *slog.Logger) *Adapter {
@@ -68,9 +74,7 @@ func (a *Adapter) Name() string { return Name }
 // In config-only mode (BinaryPath empty) Start writes the YAML and stops
 // there — useful for tests and for dev hosts without mita installed.
 func (a *Adapter) Start(ctx context.Context) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.regenerateAndReloadLocked(ctx)
+	return a.regenerateAndReload(ctx)
 }
 
 func (a *Adapter) Stop(ctx context.Context) error {
@@ -97,30 +101,33 @@ func (a *Adapter) AddUser(user core.User) error {
 		return nil
 	}
 	a.mu.Lock()
-	defer a.mu.Unlock()
-
 	desired := User{Name: user.Username, Password: user.XrayUUID}
 	if existing, ok := a.users[user.UserID]; ok && existing == desired {
+		a.mu.Unlock()
 		return nil
 	}
 	a.users[user.UserID] = desired
-	if !a.started {
+	started := a.started
+	a.mu.Unlock()
+	if !started {
 		return nil
 	}
-	return a.regenerateAndReloadLocked(context.Background())
+	return a.regenerateAndReload(context.Background())
 }
 
 func (a *Adapter) RemoveUser(userID string) error {
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	if _, ok := a.users[userID]; !ok {
+		a.mu.Unlock()
 		return nil
 	}
 	delete(a.users, userID)
-	if !a.started {
+	started := a.started
+	a.mu.Unlock()
+	if !started {
 		return nil
 	}
-	return a.regenerateAndReloadLocked(context.Background())
+	return a.regenerateAndReload(context.Background())
 }
 
 // inboundCfgWire mirrors `MieruInboundCfg` in shared/transport.ts.
@@ -143,13 +150,12 @@ func (a *Adapter) ApplyInbound(port int, rawCfg json.RawMessage) error {
 	}
 
 	a.mu.Lock()
-	defer a.mu.Unlock()
-
 	effectivePort := port
 	if effectivePort == 0 {
 		effectivePort = a.cfg.Inbound.ListenPort
 	}
 	if a.cfg.Inbound.MTU == wire.MTU && a.cfg.Inbound.ListenPort == effectivePort {
+		a.mu.Unlock()
 		a.logger.Info("mieru ApplyInbound: config unchanged, skipping")
 		return nil
 	}
@@ -157,9 +163,11 @@ func (a *Adapter) ApplyInbound(port int, rawCfg json.RawMessage) error {
 	if effectivePort != 0 {
 		a.cfg.Inbound.ListenPort = effectivePort
 	}
+	newPort := a.cfg.Inbound.ListenPort
+	a.mu.Unlock()
 	a.logger.Info("mieru ApplyInbound: config changed",
-		"mtu", wire.MTU, "port", a.cfg.Inbound.ListenPort)
-	return a.regenerateAndReloadLocked(context.Background())
+		"mtu", wire.MTU, "port", newPort)
+	return a.regenerateAndReload(context.Background())
 }
 
 // GetStats returns tracked users with zero counters. mita exposes
@@ -181,19 +189,35 @@ func (a *Adapter) Healthy() bool {
 	return a.started
 }
 
-func (a *Adapter) regenerateAndReloadLocked(ctx context.Context) error {
+// regenerateAndReload renders config + runs `mita apply/reload`. Bug #10:
+// must NOT be called with a.mu held. restartMu serializes reloads; a.mu is
+// taken only for the snapshot + the final started flag so Healthy()/GetStats
+// don't block behind the multi-second CLI calls.
+func (a *Adapter) regenerateAndReload(ctx context.Context) error {
+	a.restartMu.Lock()
+	defer a.restartMu.Unlock()
+
+	a.mu.Lock()
 	users := sortedUsers(a.users)
-	blob, err := renderConfig(a.cfg.Inbound, users)
+	inbound := a.cfg.Inbound
+	cfgPath := a.cfg.ConfigPath
+	binPath := a.cfg.BinaryPath
+	run := a.cfg.RunCmd
+	a.mu.Unlock()
+
+	blob, err := renderConfig(inbound, users)
 	if err != nil {
 		return fmt.Errorf("render mieru config: %w", err)
 	}
-	if a.cfg.ConfigPath != "" {
-		if err := writeConfig(a.cfg.ConfigPath, blob); err != nil {
+	if cfgPath != "" {
+		if err := writeConfig(cfgPath, blob); err != nil {
 			return err
 		}
 	}
-	if a.cfg.BinaryPath == "" {
+	if binPath == "" {
+		a.mu.Lock()
 		a.started = true
+		a.mu.Unlock()
 		a.logger.Info("mieru config written (config-only mode)", "users", len(users))
 		return nil
 	}
@@ -201,17 +225,19 @@ func (a *Adapter) regenerateAndReloadLocked(ctx context.Context) error {
 	// `mita apply config <path>` parses + applies the new config without
 	// dropping existing sessions. Then `mita reload` (or just SIGHUP via
 	// `mita`) finalises.
-	if out, err := a.cfg.RunCmd(ctx, a.cfg.BinaryPath, "apply", "config", a.cfg.ConfigPath); err != nil {
+	if out, err := run(ctx, binPath, "apply", "config", cfgPath); err != nil {
 		return fmt.Errorf("mita apply config: %w (%s)", err, string(out))
 	}
-	if out, err := a.cfg.RunCmd(ctx, a.cfg.BinaryPath, "reload"); err != nil {
+	if out, err := run(ctx, binPath, "reload"); err != nil {
 		// Reload might be a no-op for some mita versions where `apply
 		// config` is sufficient; warn rather than fail.
 		a.logger.Warn("mita reload returned non-zero (often safe after apply)",
 			"err", err, "out", string(out))
 	}
 
+	a.mu.Lock()
 	a.started = true
-	a.logger.Info("mieru (mita) reloaded", "users", len(users), "mtu", a.cfg.Inbound.MTU)
+	a.mu.Unlock()
+	a.logger.Info("mieru (mita) reloaded", "users", len(users), "mtu", inbound.MTU)
 	return nil
 }

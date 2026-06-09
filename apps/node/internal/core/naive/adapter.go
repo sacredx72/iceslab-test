@@ -48,11 +48,17 @@ type Adapter struct {
 	cfg    Config
 	logger *slog.Logger
 
+	// mu protects in-memory state; held only for fast ops. The slow render +
+	// caddy spawn/reload runs under restartMu so Healthy()/GetStats don't
+	// block behind a reload. Bug #10.
 	mu      sync.Mutex
 	users   map[string]User // key: userId
 	started bool
 
 	proc *subprocess.Subprocess
+
+	// restartMu serializes regenerateAndReload; never held with mu across IO.
+	restartMu sync.Mutex
 }
 
 func New(cfg Config, logger *slog.Logger) *Adapter {
@@ -92,42 +98,15 @@ func (a *Adapter) Name() string { return Name }
 // before applyInbound landed.
 func (a *Adapter) Start(ctx context.Context) error {
 	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	if a.cfg.Inbound.Hostname == "" {
+	noHost := a.cfg.Inbound.Hostname == ""
+	a.mu.Unlock()
+	if noHost {
 		a.logger.Info("naive adapter: hostname not set — waiting for ApplyInbound from panel")
 		return nil
 	}
-
-	if err := a.writeCurrentCaddyfileLocked(); err != nil {
-		return err
-	}
-
-	if a.cfg.CaddyBin == "" {
-		a.started = true
-		a.logger.Info("naive Caddyfile written (config-only mode)")
-		return nil
-	}
-
-	return a.spawnCaddyLocked(ctx)
-}
-
-// spawnCaddyLocked starts the caddy subprocess. Caller must hold a.mu and
-// must have ensured the Caddyfile is up to date on disk first.
-func (a *Adapter) spawnCaddyLocked(ctx context.Context) error {
-	proc := subprocess.New(subprocess.Config{
-		Name:   Name,
-		Binary: a.cfg.CaddyBin,
-		Args:   []string{"run", "--config", a.cfg.CaddyfilePath, "--adapter", "caddyfile"},
-		Logger: a.logger,
-	})
-	if err := proc.Start(ctx); err != nil {
-		return fmt.Errorf("start caddy: %w", err)
-	}
-	a.proc = proc
-	a.started = true
-	a.logger.Info("naive (caddy) started", "config", a.cfg.CaddyfilePath)
-	return nil
+	// regenerateAndReload handles the cold-start path (proc==nil → spawn) as
+	// well as reload, so Start just delegates.
+	return a.regenerateAndReload(ctx)
 }
 
 // Stop gracefully terminates caddy. The on-disk Caddyfile is left in place.
@@ -155,25 +134,26 @@ func (a *Adapter) AddUser(user core.User) error {
 		return nil
 	}
 	a.mu.Lock()
-	defer a.mu.Unlock()
-
 	desired := User{Username: user.Username, Password: user.NaivePassword}
 	if existing, ok := a.users[user.UserID]; ok && existing == desired {
+		a.mu.Unlock()
 		return nil
 	}
 	a.users[user.UserID] = desired
-	return a.regenerateAndReloadLocked(context.Background())
+	a.mu.Unlock()
+	return a.regenerateAndReload(context.Background())
 }
 
 // RemoveUser drops the user from the Caddyfile. Idempotent.
 func (a *Adapter) RemoveUser(userID string) error {
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	if _, ok := a.users[userID]; !ok {
+		a.mu.Unlock()
 		return nil
 	}
 	delete(a.users, userID)
-	return a.regenerateAndReloadLocked(context.Background())
+	a.mu.Unlock()
+	return a.regenerateAndReload(context.Background())
 }
 
 // GetStats returns the tracked user list with zero counters. Per-user stats
@@ -223,8 +203,6 @@ func (a *Adapter) ApplyInbound(port int, rawCfg json.RawMessage) error {
 	}
 
 	a.mu.Lock()
-	defer a.mu.Unlock()
-
 	// Wave-14 C1: port now flows from the panel binding into the Caddyfile
 	// site address. Pre-wave port was install-time only (ACME-bound, typically
 	// 443) and admin port changes from the UI were silently dropped. Fallback
@@ -237,11 +215,13 @@ func (a *Adapter) ApplyInbound(port int, rawCfg json.RawMessage) error {
 	}
 	newInbound := wire.toInboundConfig(effectivePort)
 	if inboundEqual(a.cfg.Inbound, newInbound) {
+		a.mu.Unlock()
 		a.logger.Info("naive ApplyInbound: config unchanged, skipping reload")
 		return nil
 	}
 
 	a.cfg.Inbound = newInbound
+	a.mu.Unlock()
 	a.logger.Info("naive ApplyInbound: config changed, regenerating Caddyfile",
 		"hostname", newInbound.Hostname,
 		"masqueradeRoot", newInbound.MasqueradeRoot)
@@ -249,7 +229,7 @@ func (a *Adapter) ApplyInbound(port int, rawCfg json.RawMessage) error {
 	// Background context — caller's request may have a short deadline,
 	// but we want caddy to come back up even if the caller times out
 	// (matches the xray/hysteria/awg adapter pattern).
-	return a.regenerateAndReloadLocked(context.Background())
+	return a.regenerateAndReload(context.Background())
 }
 
 // regenerateAndReloadLocked must be called with a.mu held. It writes the
@@ -263,38 +243,77 @@ func (a *Adapter) ApplyInbound(port int, rawCfg json.RawMessage) error {
 // spawn. Without this branch the first reload after applyInbound would
 // hit "no caddy running, can't reload" and the proxy would never come
 // online.
-func (a *Adapter) regenerateAndReloadLocked(parent context.Context) error {
-	if err := a.writeCurrentCaddyfileLocked(); err != nil {
-		return err
-	}
+// regenerateAndReload renders the Caddyfile and either cold-starts caddy
+// (proc==nil, first ApplyInbound) or `caddy reload`s the running one. Bug #10:
+// must NOT be called with a.mu held. restartMu serializes reloads; a.mu is
+// taken only for the snapshot + the final proc/started swap so Healthy()/
+// GetStats don't block behind the multi-second spawn/reload.
+//
+// Cold-start path matters: at install time the agent registers with no
+// Hostname (it comes from panel applyInbound), Start() deferred caddy spawn.
+// Without this branch the first reload after applyInbound would hit "no caddy
+// running, can't reload" and the proxy would never come online.
+func (a *Adapter) regenerateAndReload(parent context.Context) error {
+	a.restartMu.Lock()
+	defer a.restartMu.Unlock()
 
-	if a.cfg.CaddyBin == "" {
-		a.logger.Info("naive Caddyfile written (config-only mode)", "users", len(a.users))
-		return nil
-	}
-
-	if a.proc == nil {
-		return a.spawnCaddyLocked(parent)
-	}
-
-	ctx, cancel := context.WithTimeout(parent, a.cfg.ReloadTimeout)
-	defer cancel()
-	out, err := a.cfg.runCmd(ctx, a.cfg.CaddyBin,
-		"reload", "--config", a.cfg.CaddyfilePath, "--adapter", "caddyfile")
-	if err != nil {
-		return fmt.Errorf("caddy reload: %w (%s)", err, strings.TrimSpace(string(out)))
-	}
-	a.logger.Info("naive (caddy) reloaded", "users", len(a.users))
-	return nil
-}
-
-func (a *Adapter) writeCurrentCaddyfileLocked() error {
+	a.mu.Lock()
 	users := usersSlice(a.users)
-	blob, err := renderCaddyfile(a.cfg.Inbound, users)
+	inbound := a.cfg.Inbound
+	cfgPath := a.cfg.CaddyfilePath
+	bin := a.cfg.CaddyBin
+	reloadTimeout := a.cfg.ReloadTimeout
+	run := a.cfg.runCmd
+	procExists := a.proc != nil
+	a.mu.Unlock()
+
+	blob, err := renderCaddyfile(inbound, users)
 	if err != nil {
 		return fmt.Errorf("render Caddyfile: %w", err)
 	}
-	return writeCaddyfile(a.cfg.CaddyfilePath, blob)
+	if err := writeCaddyfile(cfgPath, blob); err != nil {
+		return err
+	}
+
+	if bin == "" {
+		a.mu.Lock()
+		a.started = true
+		a.mu.Unlock()
+		a.logger.Info("naive Caddyfile written (config-only mode)", "users", len(users))
+		return nil
+	}
+
+	if !procExists {
+		// Cold start: spawn caddy.
+		proc := subprocess.New(subprocess.Config{
+			Name:   Name,
+			Binary: bin,
+			Args:   []string{"run", "--config", cfgPath, "--adapter", "caddyfile"},
+			Logger: a.logger,
+		})
+		if err := proc.Start(parent); err != nil {
+			return fmt.Errorf("start caddy: %w", err)
+		}
+		a.mu.Lock()
+		a.proc = proc
+		a.started = true
+		a.mu.Unlock()
+		a.logger.Info("naive (caddy) started", "config", cfgPath)
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(parent, reloadTimeout)
+	defer cancel()
+	out, err := run(ctx, bin,
+		"reload", "--config", cfgPath, "--adapter", "caddyfile")
+	if err != nil {
+		return fmt.Errorf("caddy reload: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+	a.mu.Lock()
+	a.started = true
+	a.mu.Unlock()
+	a.logger.Info("naive (caddy) reloaded", "users", len(users))
+	return nil
 }
 
 func usersSlice(in map[string]User) []User {

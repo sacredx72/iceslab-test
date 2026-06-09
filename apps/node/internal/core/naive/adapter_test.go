@@ -78,13 +78,17 @@ func newManagedTestAdapter(t *testing.T, fake *fakeCLI) (*Adapter, string) {
 		runCmd:        fake.run,
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	// Write the initial Caddyfile so reload has something to point at.
-	if err := a.writeCurrentCaddyfileLocked(); err != nil {
+	blob, err := renderCaddyfile(a.cfg.Inbound, usersSlice(a.users))
+	if err != nil {
+		t.Fatalf("render seed Caddyfile: %v", err)
+	}
+	if err := writeCaddyfile(a.cfg.CaddyfilePath, blob); err != nil {
 		t.Fatalf("seed Caddyfile: %v", err)
 	}
 	a.started = true
-	// Non-nil proc forces regenerateAndReloadLocked into the reload branch
-	// (via injected runCmd) instead of the production cold-start path that
-	// shells out to subprocess.New — caddy binary isn't on PATH in CI.
+	// Non-nil proc forces regenerateAndReload into the reload branch (via
+	// injected runCmd) instead of the production cold-start path that shells
+	// out to subprocess.New — caddy binary isn't on PATH in CI.
 	a.proc = &subprocess.Subprocess{}
 	return a, caddyfile
 }
