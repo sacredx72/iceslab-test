@@ -26,6 +26,13 @@ export interface SubscriptionPageData {
   };
   /** Distinct protocols present in this subscription. */
   protocols: ProtocolName[];
+  /** Pre-rendered QR SVG markup (generated server-side, trusted, embedded
+   *  raw). Slice 2 / wave-14 #6. `subUrl` QR is the "scan to import the
+   *  whole subscription" code for proxy clients; `awg` QR encodes the
+   *  wg-quick config text for scanning into AmneziaVPN directly. Either may
+   *  be omitted (e.g. no AWG endpoint, or QR generation failed). */
+  subUrlQrSvg?: string;
+  awgQrSvg?: string;
 }
 
 function esc(s: string): string {
@@ -66,6 +73,9 @@ interface Labels {
   downloadHint: string;
   awgConf: string;
   support: string;
+  scanTitle: string;
+  scanSubHint: string;
+  scanAwgHint: string;
   statusValues: Record<string, string>;
 }
 
@@ -87,6 +97,9 @@ const L: Record<'ru' | 'en', Labels> = {
     downloadHint: 'Direct config files for apps that import from a file.',
     awgConf: 'AmneziaWG (.conf)',
     support: 'Support',
+    scanTitle: 'Scan to add',
+    scanSubHint: 'Subscription: scan with Hiddify, v2rayNG, Streisand, etc.',
+    scanAwgHint: 'AmneziaWG: scan with the AmneziaVPN app.',
     statusValues: {
       active: 'active',
       disabled: 'disabled',
@@ -111,6 +124,9 @@ const L: Record<'ru' | 'en', Labels> = {
     downloadHint: 'Готовые файлы конфигурации для приложений, импортирующих из файла.',
     awgConf: 'AmneziaWG (.conf)',
     support: 'Поддержка',
+    scanTitle: 'Сканировать',
+    scanSubHint: 'Подписка: сканируйте в Hiddify, v2rayNG, Streisand и т.п.',
+    scanAwgHint: 'AmneziaWG: сканируйте в приложении AmneziaVPN.',
     statusValues: {
       active: 'активна',
       disabled: 'отключена',
@@ -187,6 +203,24 @@ export function buildSubscriptionPage(data: SubscriptionPageData): string {
     ? `<a class="support" href="${esc(data.supportUrl)}">${esc(t.support)} →</a>`
     : '';
 
+  // QR SVGs are generated server-side by us (trusted markup), embedded raw.
+  // Never escape them - they are SVG, not user input.
+  const qrCards: string[] = [];
+  if (data.subUrlQrSvg) {
+    qrCards.push(
+      `<div class="qr"><div class="qrbox">${data.subUrlQrSvg}</div><div class="hint">${esc(t.scanSubHint)}</div></div>`,
+    );
+  }
+  if (data.awgQrSvg) {
+    qrCards.push(
+      `<div class="qr"><div class="qrbox">${data.awgQrSvg}</div><div class="hint">${esc(t.scanAwgHint)}</div></div>`,
+    );
+  }
+  const scanCard =
+    qrCards.length > 0
+      ? `<div class="card"><div class="label">${esc(t.scanTitle)}</div><div class="qrs">${qrCards.join('')}</div></div>`
+      : '';
+
   return `<!DOCTYPE html>
 <html lang="${data.lang}">
 <head>
@@ -239,6 +273,10 @@ export function buildSubscriptionPage(data: SubscriptionPageData): string {
     text-transform:uppercase; letter-spacing:0.06em;
   }
   .support { display:inline-block; margin-top:16px; color:var(--cyan); text-decoration:none; font-size:13px; }
+  .qrs { display:flex; flex-wrap:wrap; gap:16px; }
+  .qr { flex:1; min-width:160px; text-align:center; }
+  .qrbox { background:#fff; border-radius:8px; padding:10px; display:inline-block; }
+  .qrbox svg { display:block; width:160px; height:160px; }
 </style>
 </head>
 <body>
@@ -266,6 +304,8 @@ export function buildSubscriptionPage(data: SubscriptionPageData): string {
       <button class="btn" id="copy">${esc(t.copy)}</button>
     </div>
   </div>
+
+  ${scanCard}
 
   <div class="card">
     <div class="label">${esc(t.importTitle)}</div>

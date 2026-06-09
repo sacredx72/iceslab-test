@@ -84,4 +84,20 @@ describe('buildSubscriptionPage', () => {
       'https://t.me/support',
     );
   });
+
+  it('renders the scan card only when at least one QR SVG is provided', () => {
+    expect(buildSubscriptionPage(base())).not.toContain('class="qrs"');
+    const withQr = buildSubscriptionPage(base({ subUrlQrSvg: '<svg id="sub"></svg>' }));
+    expect(withQr).toContain('class="qrs"');
+    // QR SVG markup is embedded raw (trusted, server-generated), not escaped.
+    expect(withQr).toContain('<svg id="sub"></svg>');
+  });
+
+  it('shows the AWG QR only when awgQrSvg is provided', () => {
+    const both = buildSubscriptionPage(
+      base({ subUrlQrSvg: '<svg id="sub"></svg>', awgQrSvg: '<svg id="awg"></svg>' }),
+    );
+    expect(both).toContain('<svg id="awg"></svg>');
+    expect(both).toContain('AmneziaVPN');
+  });
 });
