@@ -7,7 +7,6 @@ import {
   Group,
   Menu,
   Progress,
-  SegmentedControl,
   Select,
   SimpleGrid,
   Stack,
@@ -168,6 +167,19 @@ function StatChip({ icon, label, value, accent, active, onClick }: StatChipProps
       padding="sm"
       radius="md"
       onClick={onClick}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      aria-pressed={onClick ? active : undefined}
+      onKeyDown={
+        onClick
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onClick();
+              }
+            }
+          : undefined
+      }
       style={{
         cursor: onClick ? 'pointer' : 'default',
         backgroundColor: CARD,
@@ -422,32 +434,16 @@ export function UsersPage() {
         />
       </SimpleGrid>
 
-      {/* Search + filters */}
-      <Group gap="sm" wrap="nowrap">
-        <TextInput
-          placeholder={t('users.searchPlaceholder')}
-          leftSection={<IconSearch size={16} color={MIST} />}
-          value={search}
-          onChange={(e) => setSearch(e.currentTarget.value)}
-          style={{ flex: 1 }}
-          styles={{
-            input: { backgroundColor: CARD, borderColor: HAIRLINE, color: SNOW },
-          }}
-        />
-        <SegmentedControl
-          value={statusFilter}
-          onChange={(v) => setStatusFilter(v as StatusFilter)}
-          data={[
-            { value: 'all', label: t('common.all') },
-            { value: 'active', label: t('users.statChips.active') },
-            { value: 'expired', label: t('users.statChips.expired') },
-            { value: 'limited', label: t('users.statChips.limited') },
-            { value: 'disabled', label: t('users.statChips.disabled') },
-          ]}
-          size="sm"
-          visibleFrom="md"
-        />
-      </Group>
+      {/* Search (status filtering is driven by the clickable stat chips above) */}
+      <TextInput
+        placeholder={t('users.searchPlaceholder')}
+        leftSection={<IconSearch size={16} color={MIST} />}
+        value={search}
+        onChange={(e) => setSearch(e.currentTarget.value)}
+        styles={{
+          input: { backgroundColor: CARD, borderColor: HAIRLINE, color: SNOW },
+        }}
+      />
 
       {/* Table */}
       <Card withBorder padding={0} radius="md" style={{ backgroundColor: CARD, borderColor: HAIRLINE }}>

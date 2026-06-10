@@ -52,6 +52,7 @@ interface CardNode {
   todayBytes: number;
   metrics: DashboardNode['metrics'];
   rawId: string;
+  address: string;
 }
 
 interface Props {
@@ -159,16 +160,15 @@ export function NodeCard({
                   </Badge>
                 )}
               </Group>
-              <Text
-                size="xs"
-                truncate
-                style={{ color: MIST, fontFamily: "'Geist Mono', monospace" }}
-              >
-                {t('nodes.cardSummary', {
-                  count: node.inboundCount,
-                  bytes: formatBytes(node.todayBytes),
-                })}
-              </Text>
+              <Tooltip label={node.address} withArrow openDelay={300} position="bottom-start">
+                <Text
+                  size="xs"
+                  truncate
+                  style={{ color: MIST, fontFamily: "'Geist Mono', monospace" }}
+                >
+                  {node.address}
+                </Text>
+              </Tooltip>
             </Stack>
           </Group>
           <Group gap={4} wrap="nowrap">

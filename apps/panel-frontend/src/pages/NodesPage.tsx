@@ -325,9 +325,12 @@ export function NodesPage() {
       {(regionsQuery.data?.regions ?? []).length > 0 && (
         <Group gap="xs" wrap="wrap">
           <Badge
+            component="button"
+            type="button"
             variant={regionFilter === 'all' ? 'filled' : 'light'}
             color="blue"
             size="lg"
+            aria-pressed={regionFilter === 'all'}
             style={{ cursor: 'pointer', textTransform: 'none' }}
             onClick={() => setRegionFilter('all')}
           >
@@ -336,9 +339,12 @@ export function NodesPage() {
           {(regionsQuery.data?.regions ?? []).map((r) => (
             <Badge
               key={r.id}
+              component="button"
+              type="button"
               variant={regionFilter === r.id ? 'filled' : 'light'}
               color="cyan"
               size="lg"
+              aria-pressed={regionFilter === r.id}
               style={{ cursor: 'pointer', textTransform: 'none' }}
               onClick={() => setRegionFilter(r.id)}
             >
@@ -377,6 +383,7 @@ export function NodesPage() {
                 node={{
                   ...dashNode,
                   rawId: n.id,
+                  address: n.address,
                   regionLabel,
                   maxUsers: n.maxUsers ?? null,
                   // approxUsers: capacity bar source. Real per-node user

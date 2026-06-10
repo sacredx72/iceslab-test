@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next';
 import {
   ActionIcon,
   Badge,
-  Box,
   Button,
   Card,
   Group,
@@ -435,8 +434,9 @@ function ProfileCard({
           {profile.protocol}
         </Badge>
         <Tooltip label={bindingCount === 0 ? t('profiles.bindingsTooltipNone') : t('profiles.bindingsTooltipDeployed')}>
-          <Box
+          <UnstyledButton
             onClick={onDeploy}
+            aria-label={bindingCount === 0 ? t('profiles.bindingsTooltipNone') : t('profiles.bindingsTooltipDeployed')}
             style={{
               cursor: 'pointer',
               display: 'inline-flex',
@@ -454,7 +454,7 @@ function ProfileCard({
           >
             <IconServer2 size={11} />
             {bindingCount}
-          </Box>
+          </UnstyledButton>
         </Tooltip>
         {!profile.enabled && (
           <Badge variant="default" size="sm" style={{ backgroundColor: `${MIST}1A`, color: MIST }}>
