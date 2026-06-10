@@ -31,7 +31,11 @@ services:
   redis:
     image: redis:7-alpine
     container_name: iceslab-prod-redis
-    command: ["redis-server", "--appendonly", "yes"]
+    # --maxmemory caps the dataset so a runaway can't OOM a small host;
+    # noeviction makes Redis reject writes instead of silently dropping keys —
+    # critical because BullMQ jobs (node pushes, cron work) live in Redis and
+    # eviction would lose queued work. Raise the cap on bigger boxes.
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
     volumes:
       - redis_prod_data:/data
     restart: unless-stopped

@@ -47,6 +47,17 @@ COMPOSE_FILE="docker-compose.prod.yml"
 ENV_FILE=".env.production"
 require_compose_root
 
+# ───── Safety: snapshot the secrets file before touching anything ─────
+# .env.production is the ONLY copy of JWT_SECRET, POSTGRES_PASSWORD and the
+# node mTLS CA on this host. A bad edit or git op could wipe it, taking every
+# node's trust + every admin session with it. Keep a short ring of timestamped
+# copies (last 5) next to it. `cp -p` preserves the 600 perms.
+if [[ -f "$ENV_FILE" ]]; then
+    cp -p "$ENV_FILE" "${ENV_FILE}.bak.$(date +%Y%m%d-%H%M%S)"
+    ls -1t "${ENV_FILE}".bak.* 2>/dev/null | tail -n +6 | xargs -r rm -f
+    log_info "backed up ${ENV_FILE} (keeping last 5)"
+fi
+
 DC=(docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE")
 STEP_TOTAL=5
 
