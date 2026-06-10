@@ -50,18 +50,16 @@ require_compose_root
 DC=(docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE")
 STEP_TOTAL=5
 
-# ───── Step 1: git pull (ff-only, fail loudly on divergence) ─────
-SHA_BEFORE=$(git_short_sha)
-step 1 "git pull (was at ${SHA_BEFORE})"
-# --ff-only refuses to merge on local divergence. If git_pull would
-# create a merge commit, operator wanted to know about local changes
-# before the deploy nuked their working tree.
-git pull --ff-only
-SHA_AFTER=$(git_short_sha)
+# ───── Step 1: sync source to ICESLAB_REF ─────
+# Honors ICESLAB_REF (branch like `main`, or pinned tag like v0.1.4); defaults
+# to the current branch. See git_sync_to_ref in _lib.sh for why this replaced a
+# bare `git pull` (the tag-pinned detached-HEAD silent-no-op trap).
+step 1 "sync source (ICESLAB_REF=${ICESLAB_REF:-current branch})"
+git_sync_to_ref
 if [[ "$SHA_BEFORE" == "$SHA_AFTER" ]]; then
-    log_info "  no new commits — re-deploying ${SHA_AFTER}"
+    log_info "  ${SYNC_TARGET}: no new commits — re-deploying ${SHA_AFTER}"
 else
-    log_info "  ${SHA_BEFORE} → ${SHA_AFTER}"
+    log_info "  ${SYNC_TARGET}: ${SHA_BEFORE} -> ${SHA_AFTER}"
 fi
 step_done
 

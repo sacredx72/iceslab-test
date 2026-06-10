@@ -399,7 +399,11 @@ step "Source checkout (${ICESLAB_REF})"
 if [[ ! -d "$ICESLAB_DIR/.git" ]]; then
   log "Cloning $ICESLAB_REPO@$ICESLAB_REF into $ICESLAB_DIR"
   "${APT_ENV[@]}" apt-get "${APT_OPTS[@]}" install -y git
-  git clone --depth 1 --branch "$ICESLAB_REF" "$ICESLAB_REPO" "$ICESLAB_DIR"
+  # Full clone (NOT --depth 1 / single-branch): a shallow single-branch clone
+  # leaves origin/main and other tags unreachable, so later `deploy.sh` /
+  # updates get stuck on the pinned tag with no path forward (detached-HEAD
+  # trap, caught live 2026-06-10). The repo is tiny, so a full clone is cheap.
+  git clone --branch "$ICESLAB_REF" "$ICESLAB_REPO" "$ICESLAB_DIR"
 else
   log "Updating existing checkout at $ICESLAB_DIR"
   # Detect operator-edited working tree before nuking it. The installer
@@ -413,9 +417,11 @@ else
     fi
     log "FORCE_RESET=1 — discarding local edits in $ICESLAB_DIR"
   fi
-  git -C "$ICESLAB_DIR" fetch --depth 1 origin "$ICESLAB_REF"
-  git -C "$ICESLAB_DIR" checkout "$ICESLAB_REF"
-  git -C "$ICESLAB_DIR" reset --hard "origin/$ICESLAB_REF" || true
+  # Fetch ALL branches + tags (not --depth 1 / single ref) so origin/main and
+  # new release tags stay reachable for future updates.
+  git -C "$ICESLAB_DIR" fetch origin '+refs/heads/*:refs/remotes/origin/*' --tags --prune
+  git -C "$ICESLAB_DIR" checkout --force "$ICESLAB_REF"
+  git -C "$ICESLAB_DIR" reset --hard "origin/$ICESLAB_REF" 2>/dev/null || true
 fi
 
 # Wave-14 #4: tags on GitHub are mutable — if the upstream repo or a

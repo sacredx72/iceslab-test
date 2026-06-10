@@ -166,3 +166,41 @@ git_short_sha_or_die() {
     fi
     git rev-parse --short HEAD
 }
+
+# git_sync_to_ref: bring the checkout to ICESLAB_REF (a branch like `main`, or a
+# pinned tag like v0.1.4). Defaults to the current branch when ICESLAB_REF is
+# unset. Replaces a bare `git pull --ff-only`, which was a trap: the installer
+# leaves a tag-pinned DETACHED HEAD where pull silently no-ops, so operators
+# rebuilt STALE code believing they had updated (caught live 2026-06-10, a panel
+# stuck rebuilding v0.1.2). This fetches ALL branches + tags (overriding the
+# single-branch refspec a shallow install clone leaves behind), then checks out
+# the target explicitly, erroring loudly when the intent is ambiguous.
+#
+# Sets globals for the caller to log: SHA_BEFORE, SHA_AFTER, SYNC_TARGET.
+# Honors FORCE_RESET=1 to discard local edits. Exits non-zero on bad state.
+git_sync_to_ref() {
+    SHA_BEFORE=$(git_short_sha)
+    SYNC_TARGET="${ICESLAB_REF:-}"
+    if [[ -z "$SYNC_TARGET" ]]; then
+        SYNC_TARGET=$(git symbolic-ref --short -q HEAD || true)
+        if [[ -z "$SYNC_TARGET" ]]; then
+            log_err "Detached HEAD (repo pinned to a tag/sha) and ICESLAB_REF unset."
+            log_err "Pick what to deploy, for example:"
+            log_err "    ICESLAB_REF=main   bash scripts/deploy.sh   # track latest"
+            log_err "    ICESLAB_REF=v0.1.4 bash scripts/deploy.sh   # pin a release"
+            exit 1
+        fi
+    fi
+    if [[ -n "$(git status --porcelain)" && "${FORCE_RESET:-0}" != "1" ]]; then
+        log_err "Working tree has local changes; refusing to switch/reset refs."
+        log_err "Commit or stash them, or re-run with FORCE_RESET=1 to discard."
+        exit 1
+    fi
+    git fetch origin '+refs/heads/*:refs/remotes/origin/*' --tags --prune
+    if git show-ref --verify --quiet "refs/remotes/origin/${SYNC_TARGET}"; then
+        git checkout -B "$SYNC_TARGET" "origin/$SYNC_TARGET"   # branch: track + advance
+    else
+        git checkout --force "$SYNC_TARGET"                    # tag/sha: pinned checkout
+    fi
+    SHA_AFTER=$(git_short_sha)
+}

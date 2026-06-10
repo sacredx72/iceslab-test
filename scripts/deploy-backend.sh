@@ -41,15 +41,15 @@ require_compose_root
 DC=(docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE")
 STEP_TOTAL=4
 
-# ───── Step 1: git pull ─────
-SHA_BEFORE=$(git_short_sha)
-step 1 "git pull (was at ${SHA_BEFORE})"
-git pull --ff-only
-SHA_AFTER=$(git_short_sha)
+# ───── Step 1: sync source to ICESLAB_REF ─────
+# Honors ICESLAB_REF (branch or pinned tag); defaults to the current branch.
+# See git_sync_to_ref in _lib.sh (replaces the bare `git pull` detached-HEAD trap).
+step 1 "sync source (ICESLAB_REF=${ICESLAB_REF:-current branch})"
+git_sync_to_ref
 if [[ "$SHA_BEFORE" == "$SHA_AFTER" ]]; then
-    log_info "  no new commits — re-deploying ${SHA_AFTER}"
+    log_info "  ${SYNC_TARGET}: no new commits — re-deploying ${SHA_AFTER}"
 else
-    log_info "  ${SHA_BEFORE} → ${SHA_AFTER}"
+    log_info "  ${SYNC_TARGET}: ${SHA_BEFORE} -> ${SHA_AFTER}"
 fi
 step_done
 
