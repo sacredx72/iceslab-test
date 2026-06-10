@@ -1034,3 +1034,21 @@ export async function updateSettings(
   );
   return data;
 }
+
+// ───── System / version (ROADMAP D1) ─────
+
+export interface SystemVersion {
+  /** Running panel version (backend package.json). */
+  current: string;
+  /** Latest GitHub release tag, or null when the check couldn't run
+   *  (GitHub unreachable, or private repo without GITHUB_TOKEN). */
+  latest: string | null;
+  updateAvailable: boolean;
+  releaseUrl: string | null;
+  checkedAt: string | null;
+}
+
+export async function getSystemVersion(): Promise<SystemVersion> {
+  const { data } = await api.get<SystemVersion>('/api/system/version');
+  return data;
+}

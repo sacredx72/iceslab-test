@@ -20,7 +20,7 @@ import {
 import { useAuth } from '../stores/auth';
 import { useBrandName } from '../hooks/useBrandName';
 import { LanguageSwitcher } from './LanguageSwitcher';
-import { getDashboardOverview } from '../lib/api';
+import { getDashboardOverview, getSystemVersion } from '../lib/api';
 
 const HAIRLINE = '#1C2A3D';
 const GROUND = '#08101A';
@@ -189,6 +189,17 @@ export function AppLayout() {
     staleTime: 10_000,
   });
 
+  // ROADMAP D1 — update-available check. Cheap: the backend caches the GitHub
+  // call for 6h, so a long staleTime + a couple of refetches a day is plenty.
+  const versionQuery = useQuery({
+    queryKey: ['system', 'version'],
+    queryFn: getSystemVersion,
+    staleTime: 60 * 60 * 1000,
+    refetchInterval: 6 * 60 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
+  const update = versionQuery.data?.updateAvailable ? versionQuery.data : null;
+
   const userCount = dashQuery.data?.users.total;
   const profileCount = dashQuery.data?.inventory.profileCount;
   const squadCount = dashQuery.data?.inventory.squadCount;
@@ -305,15 +316,47 @@ export function AppLayout() {
               >
                 {brandName.toLowerCase()}
               </Text>
-              <Text
-                style={{
-                  ...MONO_LABEL,
-                  fontSize: 9,
-                  letterSpacing: '0.1em',
-                }}
-              >
-                v{__APP_VERSION__}
-              </Text>
+              {update ? (
+                <Text
+                  component="a"
+                  href={update.releaseUrl ?? undefined}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={t('sidebar.updateAvailable', { version: update.latest })}
+                  style={{
+                    ...MONO_LABEL,
+                    fontSize: 9,
+                    letterSpacing: '0.1em',
+                    color: CYAN2,
+                    textDecoration: 'none',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}
+                >
+                  <Box
+                    component="span"
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: '50%',
+                      backgroundColor: CYAN2,
+                      boxShadow: `0 0 6px ${CYAN2}`,
+                    }}
+                  />
+                  v{__APP_VERSION__}
+                </Text>
+              ) : (
+                <Text
+                  style={{
+                    ...MONO_LABEL,
+                    fontSize: 9,
+                    letterSpacing: '0.1em',
+                  }}
+                >
+                  v{__APP_VERSION__}
+                </Text>
+              )}
             </Box>
 
             {/* Signed in as */}

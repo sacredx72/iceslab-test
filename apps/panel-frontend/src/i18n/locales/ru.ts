@@ -57,6 +57,7 @@ export default {
     subscriptionRouting: 'Маршрутизация',
     systemGroup: 'Система',
     searchPlaceholder: 'Поиск…',
+    updateAvailable: 'Доступно обновление: {{version}}',
   },
 
   breadcrumb: {

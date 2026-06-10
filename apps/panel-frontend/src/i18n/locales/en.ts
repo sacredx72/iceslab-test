@@ -55,6 +55,7 @@ export default {
     subscriptionRouting: 'Routing',
     systemGroup: 'System',
     searchPlaceholder: 'Search anything',
+    updateAvailable: 'Update available: {{version}}',
   },
 
   breadcrumb: {
