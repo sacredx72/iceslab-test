@@ -3,6 +3,44 @@
 All notable changes to Iceslab are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are git tags.
 
+## v0.1.5
+
+Full Xray protocol matrix: VLESS, VMess and Trojan over any transport and any
+security mode, behind a guided picker. Plus an update-available indicator and a
+round of VPS hardening.
+
+### Security
+
+- **nginx ships hardening headers.** `X-Frame-Options`, `X-Content-Type-Options`,
+  `Referrer-Policy` and `server_tokens off` on every response. CSP is left to the
+  operator so a wrong policy can't silently break the SPA.
+
+### Added
+
+- **Full Xray protocol matrix.** A profile can now run VLESS, VMess or Trojan over
+  any of the six transports (raw, WebSocket, gRPC, xHTTP, HTTPUpgrade, mKCP) and
+  any security mode: REALITY, plain `none` (for a CDN that terminates TLS itself),
+  or node-terminated TLS with your own certificate. A guided three-step picker
+  (protocol, then transport, then security) reveals only the fields each
+  combination needs, and every combination is emitted correctly into the
+  raw/base64, Clash, sing-box and Xray-JSON subscription formats.
+- **Update-available indicator.** The sidebar shows an accent dot linking to the
+  release when a newer version ships. The panel checks the latest GitHub release
+  (cached 6h, best-effort: it never blocks a request or breaks if GitHub is
+  unreachable, and needs no token on the public repo).
+
+### Changed
+
+- **Subscription formatters are security-aware.** Clash, sing-box and Xray-JSON
+  hardcoded REALITY for every Xray endpoint, so a `none` or `tls` profile would
+  have produced a broken client config. They now render the correct security
+  block per endpoint and carry all three subprotocols.
+- **VPS resource and secret safety.** Redis is capped (`--maxmemory` with
+  `noeviction`, so a runaway can't OOM a small host and queued jobs are never
+  silently dropped), and `deploy.sh` snapshots `.env.production` (the only on-host
+  copy of the JWT secret, DB password and node mTLS CA) to a timestamped backup
+  ring before each deploy.
+
 ## v0.1.4
 
 Reliability hardening after a deep code audit: the bug-fix campaign, a deploy/
