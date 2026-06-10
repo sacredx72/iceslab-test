@@ -3,6 +3,43 @@
 All notable changes to Iceslab are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are git tags.
 
+## v0.1.4
+
+Reliability hardening after a deep code audit: the bug-fix campaign, a deploy/
+update fix so operators stop getting stuck on stale code, and a round of UI polish.
+
+### Fixed
+
+- **node-agent no longer stalls during a core restart.** Adapter mutexes were
+  held across the multi-second subprocess restart (xray / shadowsocks / mtproto /
+  mieru / naive), blocking `/healthz` and the panel's push workers, plus a data
+  race on the Hysteria auth-callback. Locks are split so restarts run lock-free.
+- **deploy/update no longer silently rebuilds stale code.** `deploy*.sh` ran
+  `git pull --ff-only`, a no-op on the tag-pinned detached HEAD the installer
+  leaves behind, so re-deploys quietly rebuilt the old version. They now sync to
+  `ICESLAB_REF` (branch or tag), fetch all refs, and fail loudly on an ambiguous
+  detached HEAD. The installer is a full clone so updates stay reachable.
+- **deploy applies new migrations.** Migrations ran against the previous image
+  before the rebuild, so a deploy that added a migration silently skipped it.
+  Reordered to build, then migrate, then start.
+- **multi-profile deploy to a fresh node.** Deploying several profiles to a new
+  node assigned port 443 to every one, so all but the first failed with
+  PORT_IN_USE. Each profile now gets a distinct port.
+- **"Top users today" dashboard card** was always empty (the table it reads was
+  never written); the stats poll now records per-user daily usage.
+- Subscription endpoint name de-dup, inline port-edit collision check, bounded
+  AmneziaWG IP allocation, and other audit fixes.
+
+### Changed
+
+- **Protocol dropdown** lists Xray first with a disabled "sing-box (soon)" teaser
+  everywhere a protocol is chosen.
+- **UI polish.** The Users status chips are now the single filter (dropped a
+  duplicate control); node cards show the node address; filter chips are
+  keyboard-operable.
+- **Build resilience.** `prisma generate` retries on a flaky network during the
+  Docker build, and the Prisma update-check call is disabled.
+
 ## v0.1.3
 
 Subscription self-service for end users, plus a dashboard CPU-reporting fix
