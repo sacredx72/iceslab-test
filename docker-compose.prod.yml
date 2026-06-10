@@ -15,6 +15,13 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: iceslab-prod-postgres
+    # Memory ceilings sized for a 2 GB / 1 CPU control-plane VPS. These are caps
+    # (a runaway container is killed + restarted, not the whole host), not
+    # reservations, so their sum can exceed RAM; steady-state usage is far lower.
+    # Raise them on bigger boxes. No CPU limits: on a single core, throttling a
+    # container only hurts. If Postgres ever gets OOM-killed under load (check
+    # `docker events` / `dmesg`), give it more here.
+    mem_limit: 512m
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -31,10 +38,11 @@ services:
   redis:
     image: redis:7-alpine
     container_name: iceslab-prod-redis
+    mem_limit: 384m
     # --maxmemory caps the dataset so a runaway can't OOM a small host;
-    # noeviction makes Redis reject writes instead of silently dropping keys —
-    # critical because BullMQ jobs (node pushes, cron work) live in Redis and
-    # eviction would lose queued work. Raise the cap on bigger boxes.
+    # noeviction makes Redis reject writes instead of silently dropping keys,
+    # which would lose BullMQ jobs (node pushes, cron work) that live in Redis.
+    # Raise the cap (and mem_limit) on bigger boxes.
     command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
     volumes:
       - redis_prod_data:/data
@@ -54,6 +62,11 @@ services:
       dockerfile: apps/panel-backend/Dockerfile
     image: iceslab-backend:latest
     container_name: iceslab-prod-migrate
+    mem_limit: 384m
+    # The backend image runs as the unprivileged `node` user (see Dockerfile).
+    # This one-shot shells out to pnpm/corepack for `prisma migrate deploy`,
+    # which expects root, so override back to root just for the migration.
+    user: root
     environment:
       DATABASE_URL: ${DATABASE_URL}
     depends_on:
@@ -68,6 +81,10 @@ services:
       dockerfile: apps/panel-backend/Dockerfile
     image: iceslab-backend:latest
     container_name: iceslab-prod-backend
+    # Heap is already capped at 512m via NODE_OPTIONS below; this leaves headroom
+    # for non-heap RSS (native modules, buffers). If the backend is OOM-killed
+    # under normal load, raise this (and consider the heap cap together).
+    mem_limit: 768m
     environment:
       NODE_ENV: production
       APP_HOST: 0.0.0.0
@@ -148,6 +165,7 @@ services:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
     image: iceslab-frontend:latest
     container_name: iceslab-prod-frontend
+    mem_limit: 96m
     depends_on:
       backend:
         condition: service_healthy

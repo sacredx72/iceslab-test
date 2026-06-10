@@ -83,6 +83,15 @@ WORKDIR /app
 COPY --from=builder /repo /app
 
 WORKDIR /app/apps/panel-backend
+
+# I5 — run the long-lived backend as the unprivileged `node` user (uid 1000,
+# ships with the image). Safe without extra setup: the app writes nothing to
+# disk at runtime (logs to stdout, state in Postgres/Redis), reads only
+# world-readable files copied in above, and binds an unprivileged port (3000).
+# The `migrate` one-shot overrides back to root in compose (it shells out to
+# pnpm/corepack). If a future feature needs to write to disk, mount a writable
+# volume owned by uid 1000 rather than reverting to root.
+USER node
 EXPOSE 3000
 
 # Healthcheck hits /health which pings Postgres + Redis.
