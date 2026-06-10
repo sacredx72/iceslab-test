@@ -62,47 +62,52 @@ export function buildClashYaml(endpoints: SubscriptionEndpoint[]): string {
       proxies.push(lines.join('\n'));
     } else if (e.protocol === 'xray') {
       proxyNames.push(name);
-      // Slice 24c part 3a — Trojan subprotocol shares REALITY but switches
-      // proxy type and the auth field.
-      const isTrojan = e.subprotocol === 'trojan';
-      // Slice 24c part 2 — Clash Meta `network` field accepts the same
-      // transport names as our wire (raw is "tcp" in clash terminology).
+      const sub = e.subprotocol ?? 'vless';
+      // Clash Meta `network` uses "tcp" for our "raw".
       const network = e.network === 'raw' || !e.network ? 'tcp' : e.network;
+      // securityLayer: 'default' = REALITY, else 'tls' (own cert) / 'none'
+      // (plain, e.g. CDN terminates TLS). REALITY emits reality-opts; tls emits
+      // a plain TLS block; none disables client TLS.
+      const sec = e.securityLayer ?? 'default';
+      const isReality = sec === 'default';
+      const useTls = sec !== 'none';
 
       const block = [
         `  - name: ${yamlString(name)}`,
-        `    type: ${isTrojan ? 'trojan' : 'vless'}`,
+        `    type: ${sub === 'trojan' ? 'trojan' : sub === 'vmess' ? 'vmess' : 'vless'}`,
         `    server: ${e.host}`,
         `    port: ${e.port}`,
-        isTrojan
-          ? `    password: ${yamlString(e.uuid)}`
-          : `    uuid: ${e.uuid}`,
-        `    network: ${network}`,
-        `    tls: true`,
-        `    udp: true`,
-        `    servername: ${yamlString(e.sni)}`,
+        sub === 'trojan' ? `    password: ${yamlString(e.uuid)}` : `    uuid: ${e.uuid}`,
       ];
-      // Vision flow is VLESS-only — Clash Meta rejects `flow:` on Trojan.
-      if (!isTrojan && e.flow) {
+      // VMess needs alterId (0 = AEAD) + a client cipher.
+      if (sub === 'vmess') {
+        block.push(`    alterId: 0`, `    cipher: auto`);
+      }
+      block.push(`    network: ${network}`, `    tls: ${useTls}`, `    udp: true`);
+      if (useTls && e.sni) {
+        block.push(`    servername: ${yamlString(e.sni)}`);
+      }
+      // Vision flow needs a TLS-like layer (reality or tls), not plain none.
+      if (sub === 'vless' && useTls && e.flow) {
         block.push(`    flow: ${yamlString(e.flow)}`);
       }
-      // Slice 30.1 follow-up — per-host alpn (`['h2','http/1.1']`) +
-      // skip-cert-verify. Clash Meta uses `alpn:` as a flow-style YAML list
-      // and `skip-cert-verify: true` for the CDN-fronted host case. Mihomo
-      // also accepts `tls: false` to disable client TLS when the host fronts
-      // via a CDN that terminates TLS itself (`securityLayer: 'none'`).
       if (e.alpn && e.alpn.length > 0) {
         block.push(`    alpn: [${e.alpn.map((a) => yamlString(a)).join(', ')}]`);
       }
       if (e.allowInsecure) {
         block.push(`    skip-cert-verify: true`);
       }
-      block.push(
-        `    client-fingerprint: ${yamlString(e.fingerprint)}`,
-        `    reality-opts:`,
-        `      public-key: ${yamlString(e.publicKey)}`,
-        `      short-id: ${yamlString(e.shortId)}`,
-      );
+      if (useTls && e.fingerprint) {
+        block.push(`    client-fingerprint: ${yamlString(e.fingerprint)}`);
+      }
+      // REALITY material only for the reality layer.
+      if (isReality) {
+        block.push(
+          `    reality-opts:`,
+          `      public-key: ${yamlString(e.publicKey)}`,
+          `      short-id: ${yamlString(e.shortId)}`,
+        );
+      }
       // Transport-specific options for ws/httpupgrade. Clash Meta accepts
       // the underscore-less `httpupgrade` form on modern Mihomo (≥1.18);
       // older builds wanted `http-upgrade`, but we don't target those.

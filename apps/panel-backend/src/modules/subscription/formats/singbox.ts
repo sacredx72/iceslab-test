@@ -95,14 +95,15 @@ export function buildSingboxJson(
       });
     } else if (e.protocol === 'xray') {
       proxyTags.push(tag);
+      const sub = e.subprotocol ?? 'vless';
+      // securityLayer: 'default' = REALITY, else 'tls' (own cert) / 'none'
+      // (plain, e.g. CDN-fronted). REALITY adds the reality block; tls is a
+      // plain TLS block; none omits tls entirely.
+      const sec = e.securityLayer ?? 'default';
+      const isReality = sec === 'default';
+      const useTls = sec !== 'none';
 
-      // Slice 24c part 3a — branch outbound type on subprotocol. Trojan
-      // shares REALITY but uses a password and no Vision flow.
-      const isTrojan = e.subprotocol === 'trojan';
-
-      // Slice 24c part 2 — transport selector. Reality+Vision canonical is
-      // `raw`; clients accept omitted transport for raw, but other transports
-      // need an explicit `transport` block per sing-box schema.
+      // Transport selector. raw needs no explicit transport block; others do.
       const transport =
         e.network === 'ws'
           ? {
@@ -129,30 +130,44 @@ export function buildSingboxJson(
                 }
               : {};
 
-      // Slice 30.1 follow-up — per-host alpn + insecure flag on the xray
-      // outbound's tls block. sing-box honours `tls.alpn` as a list and
-      // `tls.insecure` for the CDN-fronted self-signed scenario.
-      const xrayTls: Record<string, unknown> = {
-        enabled: true,
-        server_name: e.sni,
-        utls: { enabled: true, fingerprint: e.fingerprint },
-        reality: {
+      let xrayTls: Record<string, unknown> | undefined;
+      if (useTls) {
+        xrayTls = {
           enabled: true,
-          public_key: e.publicKey,
-          short_id: e.shortId,
-        },
-      };
-      if (e.alpn && e.alpn.length > 0) xrayTls.alpn = e.alpn;
-      if (e.allowInsecure) xrayTls.insecure = true;
+          server_name: e.sni,
+          utls: { enabled: true, fingerprint: e.fingerprint },
+        };
+        // REALITY material only for the reality layer.
+        if (isReality) {
+          xrayTls.reality = {
+            enabled: true,
+            public_key: e.publicKey,
+            short_id: e.shortId,
+          };
+        }
+        if (e.alpn && e.alpn.length > 0) xrayTls.alpn = e.alpn;
+        if (e.allowInsecure) xrayTls.insecure = true;
+      }
+
+      // Per-subprotocol fields. VMess: AEAD (alter_id 0) + client cipher.
+      const proto =
+        sub === 'trojan'
+          ? { type: 'trojan', password: e.uuid }
+          : sub === 'vmess'
+            ? { type: 'vmess', uuid: e.uuid, security: 'auto', alter_id: 0 }
+            : {
+                type: 'vless',
+                uuid: e.uuid,
+                // Vision flow needs a TLS-like layer (reality or tls), not none.
+                ...(useTls && e.flow ? { flow: e.flow } : {}),
+              };
+
       outbounds.push({
-        type: isTrojan ? 'trojan' : 'vless',
+        ...proto,
         tag,
         server: e.host,
         server_port: e.port,
-        ...(isTrojan
-          ? { password: e.uuid }                      // Trojan: UUID is the password
-          : { uuid: e.uuid, ...(e.flow ? { flow: e.flow } : {}) }), // VLESS
-        tls: xrayTls,
+        ...(xrayTls ? { tls: xrayTls } : {}),
         ...transport,
       });
     } else if (e.protocol === 'shadowsocks') {

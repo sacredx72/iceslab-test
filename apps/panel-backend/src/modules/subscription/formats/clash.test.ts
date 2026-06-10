@@ -117,6 +117,31 @@ describe('buildClashYaml', () => {
     expect(out).toContain('public-key: pubkey-base64url');
   });
 
+  // ───── VMess + security modes (none / tls) ─────
+
+  it('emits a vmess proxy with alterId/cipher and no reality-opts', () => {
+    const out = buildClashYaml([
+      { ...xrayEp, subprotocol: 'vmess', securityLayer: 'none', network: 'ws', flow: undefined },
+    ]);
+    expect(out).toContain('type: vmess');
+    expect(out).toContain('alterId: 0');
+    expect(out).toContain('cipher: auto');
+    expect(out).not.toContain('reality-opts');
+  });
+
+  it('security none emits tls: false and no reality-opts', () => {
+    const out = buildClashYaml([{ ...xrayEp, securityLayer: 'none' }]);
+    expect(out).toContain('tls: false');
+    expect(out).not.toContain('reality-opts');
+  });
+
+  it('security tls emits tls: true + servername but no reality-opts', () => {
+    const out = buildClashYaml([{ ...xrayEp, securityLayer: 'tls' }]);
+    expect(out).toContain('tls: true');
+    expect(out).toContain('servername: www.cloudflare.com');
+    expect(out).not.toContain('reality-opts');
+  });
+
   // ───── Slice 24d — Shadowsocks ─────
 
   it('emits a shadowsocks (ss) proxy entry with cipher + password + udp', () => {

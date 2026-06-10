@@ -132,6 +132,36 @@ describe('buildSingboxJson', () => {
     expect(t.tls.reality.public_key).toBe('pubkey-base64url');
   });
 
+  // ───── VMess + security modes (none / tls) ─────
+
+  it('emits a vmess outbound (security auto, alter_id 0), no reality', () => {
+    const cfg = parse(
+      buildSingboxJson([
+        { ...xrayEp, subprotocol: 'vmess', securityLayer: 'none', network: 'ws', flow: undefined },
+      ]),
+    );
+    const v = cfg.outbounds.find((o: any) => o.type === 'vmess');
+    expect(v).toBeDefined();
+    expect(v.uuid).toBe('11111111-2222-3333-4444-555555555555');
+    expect(v.security).toBe('auto');
+    expect(v.alter_id).toBe(0);
+    expect(v.tls).toBeUndefined(); // none = no TLS block
+  });
+
+  it('security none omits the tls block', () => {
+    const cfg = parse(buildSingboxJson([{ ...xrayEp, securityLayer: 'none' }]));
+    const v = cfg.outbounds.find((o: any) => o.type === 'vless');
+    expect(v.tls).toBeUndefined();
+  });
+
+  it('security tls emits a tls block without reality', () => {
+    const cfg = parse(buildSingboxJson([{ ...xrayEp, securityLayer: 'tls' }]));
+    const v = cfg.outbounds.find((o: any) => o.type === 'vless');
+    expect(v.tls.enabled).toBe(true);
+    expect(v.tls.server_name).toBe('www.cloudflare.com');
+    expect(v.tls.reality).toBeUndefined();
+  });
+
   // ───── Slice 24d — Shadowsocks ─────
 
   it('emits a shadowsocks outbound with method+password and no TLS', () => {

@@ -421,13 +421,6 @@ export async function generateSubscription(
         port,
         ...hostMeta,
         securityLayer: effectiveSecurityLayer,
-        // VMess isn't representable in clash/singbox/xrayjson yet (they build a
-        // vless entry), so keep it out of those formats to avoid a broken
-        // config. The vmess:// link still ships in the raw/base64 + json sub.
-        disableForFormats:
-          subprotocol === 'vmess'
-            ? [...hostMeta.disableForFormats, 'clash', 'singbox', 'xrayjson']
-            : hostMeta.disableForFormats,
         uuid: user.xrayUuid,
         publicKey: cfg.realityPublicKey,
         shortId,

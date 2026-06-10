@@ -47,36 +47,82 @@ export function buildXrayJson(
     if (e.protocol !== 'xray') throw new Error('unreachable'); // narrowing
     const tag = `${e.nodeName}-xray`;
     proxyTags.push(tag);
-    return {
-      tag,
-      protocol: 'vless',
-      settings: {
+    const sub = e.subprotocol ?? 'vless';
+    const network = e.network ?? 'raw';
+    // securityLayer: 'default' = REALITY, else 'tls' (own cert) / 'none' (plain).
+    const sec = e.securityLayer ?? 'default';
+    const security = sec === 'default' ? 'reality' : sec;
+    const useTls = sec !== 'none';
+
+    // settings block by subprotocol.
+    let settings: Record<string, unknown>;
+    if (sub === 'trojan') {
+      settings = { servers: [{ address: e.host, port: e.port, password: e.uuid }] };
+    } else if (sub === 'vmess') {
+      settings = {
+        vnext: [
+          { address: e.host, port: e.port, users: [{ id: e.uuid, security: 'auto', alterId: 0 }] },
+        ],
+      };
+    } else {
+      settings = {
         vnext: [
           {
             address: e.host,
             port: e.port,
-            users: [
-              {
-                id: e.uuid,
-                encryption: 'none',
-                flow: e.flow,
-              },
-            ],
+            // Vision flow needs a TLS-like layer (reality or tls), not none.
+            users: [{ id: e.uuid, encryption: 'none', ...(useTls && e.flow ? { flow: e.flow } : {}) }],
           },
         ],
-      },
-      streamSettings: {
-        network: 'raw',
-        security: 'reality',
-        realitySettings: {
-          publicKey: e.publicKey,
-          shortId: e.shortId,
-          serverName: e.sni,
-          fingerprint: e.fingerprint,
-          show: false,
-          spiderX: '',
-        },
-      },
+      };
+    }
+
+    const streamSettings: Record<string, unknown> = { network, security };
+    if (security === 'reality') {
+      streamSettings.realitySettings = {
+        publicKey: e.publicKey,
+        shortId: e.shortId,
+        serverName: e.sni,
+        fingerprint: e.fingerprint,
+        show: false,
+        spiderX: '',
+      };
+    } else if (security === 'tls') {
+      streamSettings.tlsSettings = {
+        serverName: e.sni,
+        fingerprint: e.fingerprint,
+        ...(e.alpn && e.alpn.length > 0 ? { alpn: e.alpn } : {}),
+        ...(e.allowInsecure ? { allowInsecure: true } : {}),
+      };
+    }
+    // transport-specific settings.
+    if (network === 'ws') {
+      streamSettings.wsSettings = {
+        ...(e.path ? { path: e.path } : {}),
+        ...(e.hostHeader ? { headers: { Host: e.hostHeader } } : {}),
+      };
+    } else if (network === 'httpupgrade') {
+      streamSettings.httpupgradeSettings = {
+        ...(e.path ? { path: e.path } : {}),
+        ...(e.hostHeader ? { host: e.hostHeader } : {}),
+      };
+    } else if (network === 'xhttp') {
+      streamSettings.xhttpSettings = {
+        ...(e.path ? { path: e.path } : {}),
+        ...(e.hostHeader ? { host: e.hostHeader } : {}),
+        mode: 'auto',
+      };
+    } else if (network === 'grpc') {
+      streamSettings.grpcSettings = { serviceName: e.serviceName ?? '' };
+    } else if (network === 'kcp') {
+      streamSettings.kcpSettings = { header: { type: 'none' } };
+    }
+
+    return {
+      tag,
+      protocol: sub === 'trojan' ? 'trojan' : sub === 'vmess' ? 'vmess' : 'vless',
+      settings,
+      streamSettings,
     };
   });
 

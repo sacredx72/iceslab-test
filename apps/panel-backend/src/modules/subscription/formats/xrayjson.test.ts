@@ -61,6 +61,38 @@ describe('buildXrayJson', () => {
     expect(v.streamSettings.realitySettings.fingerprint).toBe('chrome');
   });
 
+  it('emits a vmess outbound (security auto, alterId 0) with no reality', () => {
+    const cfg = parse(
+      buildXrayJson([
+        { ...xrayEp, subprotocol: 'vmess', securityLayer: 'none', network: 'ws', flow: undefined },
+      ]),
+    );
+    const v = cfg.outbounds.find((o: any) => o.protocol === 'vmess');
+    expect(v).toBeDefined();
+    const user = v.settings.vnext[0].users[0];
+    expect(user.id).toBe('11111111-2222-3333-4444-555555555555');
+    expect(user.security).toBe('auto');
+    expect(user.alterId).toBe(0);
+    expect(v.streamSettings.security).toBe('none');
+    expect(v.streamSettings.realitySettings).toBeUndefined();
+  });
+
+  it('emits a trojan outbound (servers/password), not a vless one', () => {
+    const cfg = parse(buildXrayJson([{ ...xrayEp, subprotocol: 'trojan' }]));
+    const t = cfg.outbounds.find((o: any) => o.protocol === 'trojan');
+    expect(t).toBeDefined();
+    expect(t.settings.servers[0].password).toBe('11111111-2222-3333-4444-555555555555');
+    expect(cfg.outbounds.find((o: any) => o.protocol === 'vless')).toBeUndefined();
+  });
+
+  it('security tls emits tlsSettings, not realitySettings', () => {
+    const cfg = parse(buildXrayJson([{ ...xrayEp, securityLayer: 'tls' }]));
+    const v = cfg.outbounds.find((o: any) => o.protocol === 'vless');
+    expect(v.streamSettings.security).toBe('tls');
+    expect(v.streamSettings.tlsSettings.serverName).toBe('www.cloudflare.com');
+    expect(v.streamSettings.realitySettings).toBeUndefined();
+  });
+
   it('always includes freedom (direct) and blackhole (block) outbounds', () => {
     const cfg = parse(buildXrayJson([xrayEp]));
     expect(cfg.outbounds.find((o: any) => o.protocol === 'freedom')).toBeDefined();
