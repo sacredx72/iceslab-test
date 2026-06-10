@@ -124,7 +124,7 @@ func (c *InboundConfig) withDefaults() InboundConfig {
 	// here (10.0.0.1/24, 4, 40, 70, 72, 56, 32, 16) — the TSPU-preset
 	// values. That was wrong: zero is a legitimate value (operator wants
 	// junk-obfuscation disabled), and the old subnet default collided
-	// with Aeza's host gateway. The panel UI now always sends explicit
+	// with some hosts' internal gateway. The panel UI now always sends explicit
 	// values (per AmneziawgConfigSchema), so zero on the wire means
 	// zero — not "use the default". Caught live cycle #6 2026-05-12:
 	// admin set Jc=0 in UI to debug, server kept rendering Jc=4 because
@@ -136,7 +136,7 @@ func (c *InboundConfig) withDefaults() InboundConfig {
 		// the actual internet-bound traffic, so VPN clients reached "Connected"
 		// but RX/TX was massively asymmetric (server received decrypted
 		// requests, forwarded them with private src 10.x, responses never
-		// routed back). Caught live 2026-05-13 on Aeza FI node, fixed inline
+		// routed back). Caught live 2026-05-13 on a production node, fixed inline
 		// with `iptables -t nat -A POSTROUTING -s 10.66.66.0/24 -o net0 -j MASQUERADE`;
 		// this default uses `! -o %i` so it works regardless of WAN iface name.
 		out.PostUp = "iptables -t nat -A POSTROUTING ! -o %i -j MASQUERADE"

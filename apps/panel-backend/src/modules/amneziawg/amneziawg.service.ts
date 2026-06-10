@@ -4,12 +4,12 @@ import { intToIp, ipToInt, parseSubnet } from './amneziawg.subnet.js';
 import { Prisma } from '../../generated/prisma/client.js';
 
 // Default AmneziaWG subnet. Picked far from typical hosting-provider
-// infrastructure ranges — Aeza's internal gateway sits on 10.0.0.1,
-// so any AWG server tunnel-IP of 10.0.0.1/24 collides with the host's
-// default route and the VPS loses connectivity minutes after the
-// interface comes up (caught live cycle #6 2026-05-12 via Aeza support).
-// 10.66.66.0/24 is uncommon enough to avoid most cloud-provider clashes;
-// admins can still override per-profile via the UI.
+// infrastructure ranges — some budget VPS providers put their host gateway
+// on 10.0.0.1, so an AWG server tunnel-IP of 10.0.0.1/24 collides with the
+// host's default route and the VPS loses connectivity minutes after the
+// interface comes up (caught live cycle #6 2026-05-12). 10.66.66.0/24 is
+// uncommon enough to avoid most cloud-provider clashes; admins can still
+// override per-profile via the UI.
 export const DEFAULT_SUBNET = '10.66.66.0/24';
 
 export class IpExhaustedError extends Error {

@@ -662,7 +662,7 @@ fi
 # images ship with a stale apt list (the cache from the image-build day),
 # and `apt install <new package>` fails with "Unable to locate package"
 # until the list is refreshed. Refresh is cheap (~3-5 sec on a fresh
-# Aeza/Hetzner VPS) so always-on is the right default.
+# VPS) so always-on is the right default.
 log "Refreshing apt package list"
 "${APT_ENV[@]}" apt-get "${APT_OPTS[@]}" update -y
 log "Installing apt prereqs"
@@ -1012,7 +1012,7 @@ if [[ "${SKIP_FIREWALL:-0}" != "1" ]]; then
       # VPN — packets enter on awg0 and must FORWARD to the WAN. Without
       # this flip clients reach "Connected" and handshake completes, but
       # the FORWARD chain silently drops their decrypted traffic.
-      # Caught live 2026-05-13 on Aeza FI node.
+      # Caught live 2026-05-13 on a production node.
       if [[ -f /etc/default/ufw ]]; then
         sed -i 's/^DEFAULT_FORWARD_POLICY=.*/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw
       fi
@@ -1072,7 +1072,7 @@ ProtectHome=true
 # ProtectSystem=strict forbids /run writes by default. /run/xtables.lock
 # matters too — iptables uses it from awg-quick PostUp.
 # /etc/iptables/ for netfilter-persistent users (rules.v4 rewrites).
-# Caught live 2026-05-13 on Aeza FI node after fresh install.
+# Caught live 2026-05-13 on a production node after fresh install.
 ReadWritePaths=-/var/log -/etc/iceslab-node -/etc/hysteria -/etc/xray -/usr/local/etc/xray -/etc/amnezia/amneziawg -/etc/caddy -/etc/mtg -/etc/mita -/var/lib/mita -/run -/etc/iptables
 PrivateTmp=true
 

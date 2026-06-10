@@ -38,7 +38,7 @@ If you touched the wire format between panel and node (`packages/shared/src/tran
 Lowercase prefix + short description. Examples:
 
 ```
-fix(awg): default subnet to 10.66.66.0/24 to avoid Aeza collision
+fix(awg): default subnet to 10.66.66.0/24 to avoid host-gateway collision
 feat(panel): add Mieru protocol support
 docs: document Hysteria port-hopping caveats
 chore(deps): bump prisma to 7.8

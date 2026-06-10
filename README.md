@@ -79,7 +79,7 @@ Installs the amnezia-vpn DKMS kernel module plus `awg` / `awg-quick`. The instal
 
 A few things that catch people:
 
-- Default subnet is `10.66.66.0/24`. The more obvious `10.0.0.0/24` collides with the internal gateway on some providers (Aeza in particular).
+- Default subnet is `10.66.66.0/24`. The more obvious `10.0.0.0/24` collides with the internal host gateway on some budget VPS providers.
 - Pick a port below 9999. RU mobile carriers DPI-drop outbound UDP/443, and 51820 is the WireGuard default that gets specifically targeted. 1234 or 51280 are fine.
 - Client compatibility: AmneziaVPN ≥ 4.8.12.9 or Hiddify Next ≥ 2.4. There's an upstream bug ([amnezia-client#2582](https://github.com/amnezia-vpn/amnezia-client/issues/2582)) where non-zero S3/S4 silently drops traffic; presets default to `S3=0 S4=0`.
 

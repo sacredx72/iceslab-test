@@ -134,8 +134,8 @@ func TestApplyInbound_PortChangeRegenerates(t *testing.T) {
 	}
 }
 
-// Real mtg Prometheus output (verified live 2026-05-13 on aeza-se-p1). Two
-// telegram DC IPs, each with from_client + to_client direction.
+// Real mtg Prometheus output (verified live 2026-05-13 on a production node).
+// Two telegram DC IPs, each with from_client + to_client direction.
 const fakeMtgMetrics = `# HELP mtg_client_connections A number of actively processing client connections.
 mtg_client_connections{ip_family="ipv4"} 0
 # HELP mtg_domain_fronting_traffic Traffic which is generated talking with front domain.
