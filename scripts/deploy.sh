@@ -65,25 +65,31 @@ else
 fi
 step_done
 
-# ───── Step 2: prisma migrate deploy ─────
-step 2 "prisma migrate deploy"
+# ───── Step 2: rebuild (BEFORE migrate) ─────
+# Build first. The `migrate` one-shot below runs the SAME
+# iceslab-backend:latest image, so the migration files baked into it must
+# already be the new ones. If migrate ran first (against the previous image),
+# a deploy that adds a migration would silently skip it and the freshly-built
+# backend would then boot against an un-migrated DB. So: build, then migrate.
+if [[ $NO_CACHE -eq 1 ]]; then
+    step 2 "rebuild backend + frontend (--no-cache)"
+    "${DC[@]}" build --no-cache backend frontend
+else
+    step 2 "rebuild backend + frontend (cached)"
+    "${DC[@]}" build backend frontend
+fi
+step_done
+
+# ───── Step 3: prisma migrate deploy ─────
+step 3 "prisma migrate deploy"
 # Ensure postgres is up first (some compose backends — notably podman's
 # docker shim — don't attach `run --rm` containers to the project network
 # reliably, which makes `postgres:5432` unresolvable). Bringing up postgres
 # first + using `up --abort-on-container-exit` for the one-shot migrate
-# sidesteps it.
+# sidesteps it. Runs the image built in step 2, so new migrations are present.
 "${DC[@]}" up -d postgres
 "${DC[@]}" up --abort-on-container-exit --exit-code-from migrate migrate
 "${DC[@]}" rm -fsv migrate >/dev/null 2>&1 || true
-step_done
-
-# ───── Step 3: rebuild ─────
-if [[ $NO_CACHE -eq 1 ]]; then
-    step 3 "rebuild backend + frontend (--no-cache)"
-    "${DC[@]}" build --no-cache backend frontend
-else
-    step 3 "rebuild backend + frontend (cached)"
-fi
 step_done
 
 # ───── Step 4: restart all services ─────

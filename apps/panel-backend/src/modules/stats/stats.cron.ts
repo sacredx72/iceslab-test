@@ -53,6 +53,13 @@ export async function pollNodeStats(): Promise<{ ok: number; failed: number }> {
       now.getUTCHours(),
     ),
   );
+  // Floor to current UTC day. node_user_usage_history has @@id([nodeId, date,
+  // userId]); the dashboard "Top users today" groups that table by userId
+  // WHERE date = today, so the bucket must match startOfToday()'s UTC-midnight
+  // shape exactly. Until now nothing wrote this table, so the card was empty.
+  const dateBucket = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
 
   let ok = 0;
   let failed = 0;
@@ -85,7 +92,12 @@ export async function pollNodeStats(): Promise<{ ok: number; failed: number }> {
         // commits all-or-nothing: if any upsert fails, everything rolls
         // back and the agent will return cumulative+new on next tick
         // (only deltas since the last successful commit are at risk).
-        type UserWrite = { userId: string; scaled: bigint };
+        type UserWrite = {
+          userId: string;
+          scaled: bigint;
+          scaledIn: bigint;
+          scaledOut: bigint;
+        };
         const userWrites: UserWrite[] = [];
         // Presence-only userIds (mtproto-style adapters): we have zero bytes
         // for them but the adapter reported them in res.users, which is the
@@ -97,6 +109,10 @@ export async function pollNodeStats(): Promise<{ ok: number; failed: number }> {
         // UserFormModal MTProto-row tooltip).
         const presenceOnlyUserIds: string[] = [];
         const isPresenceOnlyProtocol = node.protocol === 'mtproto';
+        // Apply the node's consumption multiplier consistently to billing
+        // (usedTrafficBytes) and the per-user daily history below.
+        const scale = (v: bigint) =>
+          multiplier === 1 ? v : BigInt(Math.round(Number(v) * multiplier));
         for (const u of userList) {
           const inB = BigInt(u.bytesIn || 0);
           const outB = BigInt(u.bytesOut || 0);
@@ -107,11 +123,12 @@ export async function pollNodeStats(): Promise<{ ok: number; failed: number }> {
             if (isPresenceOnlyProtocol) presenceOnlyUserIds.push(u.userId);
             continue;
           }
-          const scaled =
-            multiplier === 1
-              ? userDelta
-              : BigInt(Math.round(Number(userDelta) * multiplier));
-          userWrites.push({ userId: u.userId, scaled });
+          userWrites.push({
+            userId: u.userId,
+            scaled: scale(userDelta),
+            scaledIn: scale(inB),
+            scaledOut: scale(outB),
+          });
         }
 
         // Per-node hourly bucket — computed before the tx so we can include
@@ -149,6 +166,34 @@ export async function pollNodeStats(): Promise<{ ok: number; failed: number }> {
                 lastConnectedNodeId: node.id,
               },
             }),
+          );
+          // Per-user daily bucket — powers the dashboard "Top users today"
+          // card. Direction split, scaled by the node multiplier to stay
+          // consistent with usedTrafficBytes above. Zero-delta users were
+          // already `continue`d, so every w here genuinely moved bytes.
+          writes.push(
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            prisma.nodeUserUsageHistory.upsert({
+              where: {
+                nodeId_date_userId: {
+                  nodeId: node.id,
+                  date: dateBucket,
+                  userId: w.userId,
+                },
+              },
+              create: {
+                nodeId: node.id,
+                date: dateBucket,
+                userId: w.userId,
+                bytesIn: w.scaledIn,
+                bytesOut: w.scaledOut,
+              },
+              update: {
+                bytesIn: { increment: w.scaledIn },
+                bytesOut: { increment: w.scaledOut },
+              },
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            }) as any,
           );
         }
         // Presence-only upserts (MTProto fallback): touch onlineAt + record

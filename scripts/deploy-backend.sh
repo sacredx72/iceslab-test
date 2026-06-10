@@ -53,28 +53,35 @@ else
 fi
 step_done
 
-# ───── Step 2: prisma migrate deploy ─────
-step 2 "prisma migrate deploy"
+# ───── Step 2: rebuild backend (BEFORE migrate) ─────
+# Build first: the migrate one-shot below runs the same iceslab-backend:latest
+# image, so its migrations must be the new ones. Migrate-first (against the old
+# image) would silently skip a freshly-added migration. See deploy.sh for the
+# full rationale.
+if [[ $NO_CACHE -eq 1 ]]; then
+    step 2 "rebuild backend (--no-cache)"
+    "${DC[@]}" build --no-cache backend
+else
+    step 2 "rebuild backend (cached)"
+    "${DC[@]}" build backend
+fi
+step_done
+
+# ───── Step 3: prisma migrate deploy ─────
+step 3 "prisma migrate deploy"
 # Same trick as deploy.sh — use `up --abort-on-container-exit` instead of
 # `run --rm` so the migrate container reliably joins the project network
-# (podman compose backends have a known regression with `run`).
+# (podman compose backends have a known regression with `run`). Runs the image
+# built in step 2 so new migrations are present.
 "${DC[@]}" up -d postgres
 "${DC[@]}" up --abort-on-container-exit --exit-code-from migrate migrate
 "${DC[@]}" rm -fsv migrate >/dev/null 2>&1 || true
 step_done
 
-# ───── Step 3: rebuild backend ─────
-if [[ $NO_CACHE -eq 1 ]]; then
-    step 3 "rebuild backend (--no-cache)"
-    "${DC[@]}" build --no-cache backend
-else
-    step 3 "rebuild backend (cached)"
-fi
+# ───── Step 4: restart backend + status ─────
+step 4 "restart backend + status"
 "${DC[@]}" up -d --build backend
-step_done
-
-# ───── Step 4: status + tail ─────
-step 4 "status + backend tail"
+echo
 "${DC[@]}" ps backend
 echo
 log_info "backend tail (last 40 lines):"

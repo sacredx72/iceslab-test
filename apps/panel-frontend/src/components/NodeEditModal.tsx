@@ -51,6 +51,7 @@ import {
   type UpdateNodeInput,
 } from '../lib/api';
 import { COUNTRY_OPTIONS, countryFlag } from '../lib/countries';
+import { parseNodeAgentPort, pickFreeQuickDeployPort } from '../lib/ports';
 import { HostsManager } from './HostsManager';
 
 const PROTOCOL_OPTIONS: { value: NodeProtocol; label: string }[] = [
@@ -76,31 +77,6 @@ const NODE_PROTOCOL_SELECT_DATA = [
 // create wizard. Edit modal lets admin tweak per-node. Wave-13 bumped from
 // 8443 to 1337 (see NodeFormModal.tsx for rationale).
 const DEFAULT_NODE_PORT = 1337;
-
-// Quick-deploy chip ports tried in order. 443 first (standard TLS), then common
-// Cloudflare-friendly TLS alternates. Pre-2026-05-21 the chip hardcoded 443
-// and any second binding fell over with 409 PORT_IN_USE.
-const QUICK_DEPLOY_PORT_CANDIDATES = [443, 8443, 2053, 2083, 2087, 2096];
-
-// node.address is "host:port" where port is the node-agent's mTLS listener
-// (default 8443, overridable via --port at install). Binding the node-agent
-// port to a user-protocol inbound causes EADDRINUSE at adapter start, surfacing
-// as a confusing 500 from applyInbounds. Exclude it from picker + warn inline.
-function parseNodeAgentPort(address: string | undefined | null): number | null {
-  if (!address) return null;
-  const idx = address.lastIndexOf(':');
-  if (idx === -1) return null;
-  const n = Number.parseInt(address.slice(idx + 1), 10);
-  return Number.isFinite(n) ? n : null;
-}
-
-function pickFreeQuickDeployPort(occupied: number[], reserved: number[] = []): number {
-  const taken = new Set([...occupied, ...reserved]);
-  for (const p of QUICK_DEPLOY_PORT_CANDIDATES) {
-    if (!taken.has(p)) return p;
-  }
-  return Math.max(...occupied, ...reserved, 443) + 1;
-}
 
 interface FormValues {
   name: string;

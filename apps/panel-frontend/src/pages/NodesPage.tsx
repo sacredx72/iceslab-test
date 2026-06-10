@@ -45,6 +45,7 @@ import { NodeEditModal } from '../components/NodeEditModal';
 import { NodePayloadModal } from '../components/NodePayloadModal';
 import { NodeCard } from '../components/NodeCard';
 import { countryFlag } from '../lib/countries';
+import { parseNodeAgentPort, pickFreeQuickDeployPort } from '../lib/ports';
 import { PageHero } from '../components/PageHero';
 import { PrimaryButton } from '../components/PrimaryButton';
 
@@ -530,9 +531,19 @@ export function NodesPage() {
           if (profileIds.length > 0) {
             const ok: string[] = [];
             const fail: string[] = [];
+            // Assign a distinct port per profile. A fresh node has no bindings
+            // yet, so hardcoding 443 made every profile after the first collide
+            // (409 PORT_IN_USE). Reserve the node-agent's own mTLS port so an
+            // inbound never shadows it, and feed each pick the ports already
+            // assigned in this batch.
+            const agentPort = parseNodeAgentPort((input as CreateNodeInput).address);
+            const reserved = agentPort !== null ? [agentPort] : [];
+            const assigned: number[] = [];
             for (const profileId of profileIds) {
+              const port = pickFreeQuickDeployPort(assigned, reserved);
               try {
-                await createBinding({ profileId, nodeId: created.id, port: 443 });
+                await createBinding({ profileId, nodeId: created.id, port });
+                assigned.push(port);
                 ok.push(profileId);
               } catch {
                 fail.push(profileId);
