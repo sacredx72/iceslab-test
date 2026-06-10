@@ -92,7 +92,10 @@ interface FormValues {
   xrayHostHeader: string;
   xrayServiceName: string;
   xraySubprotocol: 'vless' | 'trojan' | 'vmess';
-  xraySecurity: 'reality' | 'none';
+  xraySecurity: 'reality' | 'none' | 'tls';
+  xrayTlsServerName: string;
+  xrayTlsCert: string;
+  xrayTlsKey: string;
 
   // AmneziaWG
   awgSubnet: string;
@@ -208,6 +211,9 @@ function defaults(profile: Profile | null): FormValues {
     xrayServiceName: '',
     xraySubprotocol: 'vless',
     xraySecurity: 'reality',
+    xrayTlsServerName: '',
+    xrayTlsCert: '',
+    xrayTlsKey: '',
 
     awgSubnet: '10.66.66.0/24',
     awgServerPriv: '',
@@ -268,7 +274,10 @@ function defaults(profile: Profile | null): FormValues {
         xrayHostHeader: (cfg.host as string) ?? '',
         xrayServiceName: (cfg.serviceName as string) ?? '',
         xraySubprotocol: ((cfg.subprotocol as 'vless' | 'trojan' | 'vmess') ?? 'vless'),
-        xraySecurity: ((cfg.security as 'reality' | 'none') ?? 'reality'),
+        xraySecurity: ((cfg.security as 'reality' | 'none' | 'tls') ?? 'reality'),
+        xrayTlsServerName: (cfg.tlsServerName as string) ?? base.xrayTlsServerName,
+        xrayTlsCert: (cfg.tlsCert as string) ?? base.xrayTlsCert,
+        xrayTlsKey: (cfg.tlsKey as string) ?? base.xrayTlsKey,
       };
     case 'amneziawg': {
       const obf = (cfg.obfuscation as Record<string, number | string> | undefined) ?? {};
@@ -485,6 +494,9 @@ export function ProfileFormModal({ opened, onClose, profile, onSubmit, loading }
           network: values.xrayNetwork,
           subprotocol: values.xraySubprotocol,
           security: values.xraySecurity,
+          tlsServerName: values.xrayTlsServerName,
+          tlsCert: values.xrayTlsCert,
+          tlsKey: values.xrayTlsKey,
           ...(values.xrayPath ? { path: values.xrayPath } : {}),
           ...(values.xrayHostHeader ? { host: values.xrayHostHeader } : {}),
           ...(values.xrayServiceName ? { serviceName: values.xrayServiceName } : {}),
@@ -891,12 +903,15 @@ export function ProfileFormModal({ opened, onClose, profile, onSubmit, loading }
                       REALITY
                     </Chip>
                     <Chip value="none" size="sm" variant="light">none (CDN / plain)</Chip>
+                    <Chip value="tls" size="sm" variant="light">TLS (own cert)</Chip>
                   </Group>
                 </Chip.Group>
                 <Text size="xs" c="dimmed">
                   {form.values.xraySecurity === 'reality'
                     ? 'REALITY: TLS-replacement, no domain or certificate needed. Recommended.'
-                    : 'none: plain transport. Use behind a CDN that terminates TLS (ws / httpupgrade) or for local testing. No REALITY keypair required.'}
+                    : form.values.xraySecurity === 'tls'
+                      ? 'TLS: the node terminates TLS with your own certificate (no ACME). Needs a domain + cert. REALITY is stealthier for RU.'
+                      : 'none: plain transport. Use behind a CDN that terminates TLS (ws / httpupgrade) or for local testing. No REALITY keypair required.'}
                 </Text>
               </Stack>
               {form.values.xraySecurity === 'reality' && (
@@ -955,6 +970,33 @@ export function ProfileFormModal({ opened, onClose, profile, onSubmit, loading }
                     description={t('profiles.form.cfg.realityPublicKeyDesc')}
                     required
                     {...form.getInputProps('xrayPublicKey')}
+                  />
+                </>
+              )}
+              {form.values.xraySecurity === 'tls' && (
+                <>
+                  <TextInput
+                    label="TLS serverName (SNI)"
+                    description="Domain on the certificate; the client sends it as SNI."
+                    placeholder="vpn.example.com"
+                    {...form.getInputProps('xrayTlsServerName')}
+                  />
+                  <Textarea
+                    label="TLS certificate (PEM)"
+                    description="Full chain. Embedded inline into the node config (no ACME)."
+                    placeholder="-----BEGIN CERTIFICATE-----"
+                    autosize
+                    minRows={3}
+                    maxRows={6}
+                    {...form.getInputProps('xrayTlsCert')}
+                  />
+                  <Textarea
+                    label="TLS private key (PEM)"
+                    placeholder="-----BEGIN PRIVATE KEY-----"
+                    autosize
+                    minRows={3}
+                    maxRows={6}
+                    {...form.getInputProps('xrayTlsKey')}
                   />
                 </>
               )}

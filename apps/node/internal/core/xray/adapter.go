@@ -241,10 +241,13 @@ type xrayInboundCfgWire struct {
 	// Slice 24c part 3 — controls inbound `protocol` (vless vs trojan) and
 	// `settings.clients` shape. Empty/missing → vless (back-compat).
 	Subprotocol string `json:"subprotocol,omitempty"`
-	// Stream security: "reality" (default/empty) or "none" (plain transport,
-	// e.g. ws/httpupgrade behind a CDN that terminates TLS). When "none", the
-	// Reality* fields above may be empty.
-	Security string `json:"security,omitempty"`
+	// Stream security: "reality" (default/empty), "none" (plain transport,
+	// CDN-fronted), or "tls" (node-terminated TLS with the operator's cert).
+	// Reality* fields may be empty for "none"/"tls".
+	Security      string `json:"security,omitempty"`
+	TLSServerName string `json:"tlsServerName,omitempty"`
+	TLSCert       string `json:"tlsCert,omitempty"`
+	TLSKey        string `json:"tlsKey,omitempty"`
 }
 
 // ApplyInbound parses the panel-pushed Xray config, swaps it into the live
@@ -259,8 +262,8 @@ func (a *Adapter) ApplyInbound(port int, rawCfg json.RawMessage) error {
 	if err := json.Unmarshal(rawCfg, &wire); err != nil {
 		return fmt.Errorf("xray ApplyInbound: parse cfg: %w", err)
 	}
-	// REALITY needs a private key; security="none" (plain transport) does not.
-	if wire.Security != "none" && wire.RealityPrivateKey == "" {
+	// REALITY needs a private key; "none" (plain) and "tls" (own cert) do not.
+	if (wire.Security == "" || wire.Security == "reality") && wire.RealityPrivateKey == "" {
 		return fmt.Errorf("xray ApplyInbound: realityPrivateKey is required for REALITY security")
 	}
 
@@ -289,6 +292,9 @@ func (a *Adapter) ApplyInbound(port int, rawCfg json.RawMessage) error {
 		ServiceName:        wire.ServiceName,
 		Subprotocol:        wire.Subprotocol,
 		Security:           wire.Security,
+		TLSServerName:      wire.TLSServerName,
+		TLSCert:            wire.TLSCert,
+		TLSKey:             wire.TLSKey,
 	}
 
 	a.mu.Lock()
@@ -322,7 +328,10 @@ func inboundEqual(a, b InboundConfig) bool {
 		a.HostHeader != b.HostHeader ||
 		a.ServiceName != b.ServiceName ||
 		a.Subprotocol != b.Subprotocol ||
-		a.Security != b.Security {
+		a.Security != b.Security ||
+		a.TLSServerName != b.TLSServerName ||
+		a.TLSCert != b.TLSCert ||
+		a.TLSKey != b.TLSKey {
 		return false
 	}
 	if !stringSliceEqual(a.RealityServerNames, b.RealityServerNames) {

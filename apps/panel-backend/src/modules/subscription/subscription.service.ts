@@ -319,11 +319,17 @@ export async function generateSubscription(
     } else if (ib.protocol === 'xray' && user.xrayUuid) {
       const cfg = ib.config as unknown as XrayInboundConfig & {
         subprotocol?: 'vless' | 'trojan' | 'vmess';
+        security?: 'reality' | 'none' | 'tls';
+        tlsServerName?: string;
       };
       // Slice 30 — per-host overrides on the most-used REALITY knobs. Each
       // null falls through to the profile-level config, so back-compat with
       // bindings that have only the auto-generated Default host stays exact.
-      const sni = hostOverrides?.sniOverride ?? cfg.realityServerNames[0] ?? '';
+      // For tls the SNI comes from the cert's serverName, not REALITY serverNames.
+      const sni =
+        hostOverrides?.sniOverride ??
+        (cfg.security === 'tls' ? cfg.tlsServerName : cfg.realityServerNames[0]) ??
+        '';
       const shortId = cfg.realityShortIds[0] ?? '';
       const network = cfg.network ?? 'raw';
       const subprotocol = cfg.subprotocol ?? 'vless';
@@ -343,14 +349,15 @@ export async function generateSubscription(
       // inbound, rendered as security:"none" on the node) maps to a 'none'
       // client-URI layer; otherwise reality. A per-host override (tls/none)
       // still wins over the profile base.
-      const profileSecurity =
-        (cfg as { security?: 'reality' | 'none' }).security ?? 'reality';
+      const profileSecurity = cfg.security ?? 'reality';
       const effectiveSecurityLayer: 'default' | 'tls' | 'none' =
         hostMeta.securityLayer === 'tls' || hostMeta.securityLayer === 'none'
           ? hostMeta.securityLayer
           : profileSecurity === 'none'
             ? 'none'
-            : 'default';
+            : profileSecurity === 'tls'
+              ? 'tls'
+              : 'default';
       let uri: string;
       if (subprotocol === 'trojan') {
         uri = buildTrojanRealityUri({

@@ -14,6 +14,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/icecompany-tech/iceslab/apps/node/internal/atomicfile"
 )
@@ -73,11 +74,18 @@ type InboundConfig struct {
 	// `password` for trojan instead of `id` for vless).
 	Subprotocol string
 
-	// Security is the stream security layer: "reality" (default / empty) or
+	// Security is the stream security layer: "reality" (default / empty),
 	// "none" (plain transport, e.g. ws/httpupgrade behind a CDN that terminates
-	// TLS, or local testing). When "none", the Reality* fields are not required
-	// and no realitySettings are emitted.
+	// TLS, or local testing), or "tls" (node-terminated TLS with an operator-
+	// supplied cert). When "none" the Reality* fields are not required; when
+	// "tls" the TLS* fields below are required and Reality* are ignored.
 	Security string
+
+	// TLS settings (Security == "tls"). Cert + key are PEM, embedded inline in
+	// tlsSettings.certificates (no ACME on the node).
+	TLSServerName string
+	TLSCert       string
+	TLSKey        string
 }
 
 func (c *InboundConfig) withDefaults() InboundConfig {
@@ -107,6 +115,13 @@ func (c *InboundConfig) validate() error {
 	// security="none" is a plain transport (CDN-fronted ws/httpupgrade or local
 	// testing) with no REALITY material to validate.
 	if c.Security == "none" {
+		return nil
+	}
+	// security="tls" terminates TLS on the node with an operator-supplied cert.
+	if c.Security == "tls" {
+		if c.TLSCert == "" || c.TLSKey == "" {
+			return errors.New("TLSCert and TLSKey are required for tls security")
+		}
 		return nil
 	}
 	if c.RealityPrivateKey == "" {
@@ -355,6 +370,14 @@ func buildUserInboundSettings(cfg InboundConfig, users []xrayClient) map[string]
 	}
 }
 
+// splitPEMLines turns a PEM blob into the line array xray's tlsSettings
+// `certificate`/`key` fields expect. Trims surrounding whitespace and
+// normalises CRLF so a pasted cert renders cleanly.
+func splitPEMLines(pem string) []string {
+	clean := strings.ReplaceAll(strings.TrimSpace(pem), "\r\n", "\n")
+	return strings.Split(clean, "\n")
+}
+
 // buildStreamSettings selects the right Xray streamSettings shape for the
 // configured network transport. REALITY+Vision canonical is `raw`; other
 // transports are slice 24c part 2 additions.
@@ -369,8 +392,11 @@ func buildStreamSettings(cfg InboundConfig) map[string]any {
 	}
 
 	security := "reality"
-	if cfg.Security == "none" {
+	switch cfg.Security {
+	case "none":
 		security = "none"
+	case "tls":
+		security = "tls"
 	}
 	stream := map[string]any{
 		"network":  network,
@@ -387,6 +413,22 @@ func buildStreamSettings(cfg InboundConfig) map[string]any {
 			"privateKey":  cfg.RealityPrivateKey,
 			"shortIds":    cfg.RealityShortIDs,
 		}
+	}
+	// TLS terminates on the node with the operator-supplied cert, embedded
+	// inline (no ACME). xray accepts `certificate`/`key` as string arrays.
+	if security == "tls" {
+		tls := map[string]any{
+			"certificates": []map[string]any{
+				{
+					"certificate": splitPEMLines(cfg.TLSCert),
+					"key":         splitPEMLines(cfg.TLSKey),
+				},
+			},
+		}
+		if cfg.TLSServerName != "" {
+			tls["serverName"] = cfg.TLSServerName
+		}
+		stream["tlsSettings"] = tls
 	}
 
 	switch network {

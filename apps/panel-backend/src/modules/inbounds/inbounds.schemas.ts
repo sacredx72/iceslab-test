@@ -46,7 +46,13 @@ export const XrayConfigSchema = z.object({
    * inbound with missing keys). Kept as a plain ZodObject (no .refine) so it
    * participates in the InboundConfigByProtocol discriminated union.
    */
-  security: z.enum(['reality', 'none']).default('reality'),
+  security: z.enum(['reality', 'none', 'tls']).default('reality'),
+  /** TLS (security='tls'): SNI the node serves + operator-supplied PEM cert
+   *  chain and private key (embedded inline in the xray config; no ACME). The
+   *  node's config.go validate() requires cert+key when security is 'tls'. */
+  tlsServerName: z.string().max(253).optional(),
+  tlsCert: z.string().max(16384).optional(),
+  tlsKey: z.string().max(16384).optional(),
   /**
    * REALITY target — the legitimate site Xray forwards mismatched probes to.
    * Format `host:port`, e.g. "www.cloudflare.com:443". May be empty when
