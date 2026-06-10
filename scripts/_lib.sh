@@ -196,7 +196,11 @@ git_sync_to_ref() {
         log_err "Commit or stash them, or re-run with FORCE_RESET=1 to discard."
         exit 1
     fi
-    git fetch origin '+refs/heads/*:refs/remotes/origin/*' --tags --prune
+    # --force on the fetch: a history rewrite (or any re-pointed tag) makes plain
+    # `--tags` report "would clobber existing tag" and exit non-zero, which under
+    # `set -e` aborts the whole deploy at the sync step. Forcing tags to match
+    # origin (the source of truth for a deploy) keeps re-deploys unblocked.
+    git fetch --force origin '+refs/heads/*:refs/remotes/origin/*' --tags --prune
     if git show-ref --verify --quiet "refs/remotes/origin/${SYNC_TARGET}"; then
         git checkout -B "$SYNC_TARGET" "origin/$SYNC_TARGET"   # branch: track + advance
     else
