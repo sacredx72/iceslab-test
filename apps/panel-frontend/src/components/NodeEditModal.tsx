@@ -221,7 +221,10 @@ export function NodeEditModal({
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['bindings'] });
       qc.invalidateQueries({ queryKey: ['profiles'] });
-      qc.invalidateQueries({ queryKey: ['dashboard'] });
+      // F9 - do NOT invalidate ['dashboard'] here: it forces an immediate
+      // recompute of the heavy ~20-query overview on every binding edit. The
+      // overview polls every 30s on its own, which is fresh enough for the
+      // node's binding count / today-bytes.
       notifications.show({ color: 'green', message: t('nodes.edit.bindingRemoved') });
     },
     onError: (err) =>
@@ -279,7 +282,8 @@ export function NodeEditModal({
     onSuccess: (created) => {
       qc.invalidateQueries({ queryKey: ['bindings'] });
       qc.invalidateQueries({ queryKey: ['profiles'] });
-      qc.invalidateQueries({ queryKey: ['dashboard'] });
+      // F9 - skip the ['dashboard'] invalidation (heavy overview recompute);
+      // the 30s poll keeps it fresh enough.
       notifications.show({
         color: 'green',
         message: t('nodes.edit.bindingAdded', { port: created.port }),

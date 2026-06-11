@@ -1,16 +1,33 @@
+import { lazy } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { AppLayout } from './components/AppLayout';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { LoginPage } from './pages/LoginPage';
-import { DashboardPage } from './pages/DashboardPage';
-import { InsightsPage } from './pages/InsightsPage';
-import { UsersPage } from './pages/UsersPage';
-import { NodesPage } from './pages/NodesPage';
-import { SrrPage } from './pages/SrrPage';
-import { ProfilesPage } from './pages/ProfilesPage';
-import { SquadsPage } from './pages/SquadsPage';
-import { SettingsPage } from './pages/SettingsPage';
-import { SubscriptionMetadataPage } from './pages/SubscriptionMetadataPage';
+
+// F4 - the authenticated pages are code-split so the login bundle no longer
+// pulls the entire app graph (Mantine tables, charts, every modal). Each page
+// becomes its own chunk loaded on first navigation; AppLayout's Suspense
+// boundary shows a loader in the content area while a chunk streams in.
+// Named exports → map to `default` for React.lazy.
+const DashboardPage = lazy(() =>
+  import('./pages/DashboardPage').then((m) => ({ default: m.DashboardPage })),
+);
+const InsightsPage = lazy(() =>
+  import('./pages/InsightsPage').then((m) => ({ default: m.InsightsPage })),
+);
+const UsersPage = lazy(() => import('./pages/UsersPage').then((m) => ({ default: m.UsersPage })));
+const NodesPage = lazy(() => import('./pages/NodesPage').then((m) => ({ default: m.NodesPage })));
+const SrrPage = lazy(() => import('./pages/SrrPage').then((m) => ({ default: m.SrrPage })));
+const ProfilesPage = lazy(() =>
+  import('./pages/ProfilesPage').then((m) => ({ default: m.ProfilesPage })),
+);
+const SquadsPage = lazy(() => import('./pages/SquadsPage').then((m) => ({ default: m.SquadsPage })));
+const SettingsPage = lazy(() =>
+  import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })),
+);
+const SubscriptionMetadataPage = lazy(() =>
+  import('./pages/SubscriptionMetadataPage').then((m) => ({ default: m.SubscriptionMetadataPage })),
+);
 
 export default function App() {
   return (

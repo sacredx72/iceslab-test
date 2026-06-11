@@ -1,4 +1,5 @@
-import { AppShell, Box, Stack, Text, TextInput, UnstyledButton } from '@mantine/core';
+import { Suspense } from 'react';
+import { AppShell, Box, Center, Loader, Stack, Text, TextInput, UnstyledButton } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Outlet, NavLink as RouterNavLink, useLocation, useNavigate } from 'react-router-dom';
@@ -500,7 +501,17 @@ export function AppLayout() {
 
       <AppShell.Main>
         <Box style={{ padding: '32px 40px 48px' }}>
-          <Outlet />
+          {/* F4 - lazy-loaded pages suspend while their chunk loads. Scope the
+              fallback to the content area so the sidebar/topbar stay put. */}
+          <Suspense
+            fallback={
+              <Center style={{ minHeight: '60vh' }}>
+                <Loader color="#7DD3FC" />
+              </Center>
+            }
+          >
+            <Outlet />
+          </Suspense>
         </Box>
       </AppShell.Main>
     </AppShell>
