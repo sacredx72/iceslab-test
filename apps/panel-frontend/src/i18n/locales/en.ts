@@ -493,6 +493,20 @@ export default {
   settings: {
     title: 'Settings',
     subtitle: 'Brand, API tokens, regions',
+    twofa: {
+      title: 'Two-factor (2FA)',
+      desc: 'TOTP code from an authenticator app (Google Authenticator, Aegis, 1Password) required at login.',
+      on: 'On',
+      off: 'Off',
+      enable: 'Enable 2FA',
+      disable: 'Disable 2FA',
+      confirm: 'Confirm',
+      codeLabel: '6-digit code',
+      scanHint: 'Add this secret to your authenticator app (scan the otpauth URI, or enter the secret manually), then enter the current code to confirm.',
+      copyUri: 'Copy otpauth URI',
+      enabledNotice: '2FA enabled',
+      disabledNotice: '2FA disabled',
+    },
     tokens: {
       title: 'API tokens',
       description: 'Bearer tokens for integrations (bot, scripts)',
@@ -840,6 +854,10 @@ export default {
     bootstrapHint: 'First admin has full panel access. Choose a strong password, bootstrap runs once.',
     signInFailed: 'Sign-in failed',
     unknownError: 'Unknown error',
+    twofaCodeLabel: 'Two-factor code',
+    twofaVerify: 'Verify',
+    twofaTitle: 'Two-factor',
+    twofaInvalid: 'Invalid code, try again',
   },
 
   validation: {

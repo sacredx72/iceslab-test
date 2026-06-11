@@ -1,8 +1,9 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { requireAuth } from './auth.hook.js';
 import { findAdminById } from '../admin/admin.service.js';
-import { LoginSchema, RegisterSchema } from './auth.schemas.js';
+import { LoginSchema, RegisterSchema, TotpCodeSchema } from './auth.schemas.js';
 import * as authService from './auth.service.js';
+import * as twofa from './twofa.service.js';
 import * as adminService from '../admin/admin.service.js';
 import { mapAdminToPublic } from '../admin/admin.mapper.js';
 import { notifyTelegramAsync, escapeMarkdown, redactIp, redactUsername } from '../../lib/telegram-notify.js';
@@ -109,6 +110,23 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
             message: err.message,
           });
         }
+        // K8 - password was correct but 2FA is on and no code was sent yet.
+        // 401 with a flag so the SPA shows the code field (not a hard fail).
+        if (err instanceof authService.TotpRequiredError) {
+          return reply.code(401).send({
+            error: 'TOTP_REQUIRED',
+            message: err.message,
+            requires2fa: true,
+          });
+        }
+        if (err instanceof authService.InvalidTotpError) {
+          loginAttempts.inc({ result: 'invalid' });
+          return reply.code(401).send({
+            error: 'INVALID_TOTP',
+            message: err.message,
+            requires2fa: true,
+          });
+        }
         throw err;
       }
     },
@@ -158,6 +176,70 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(404).send({ error: 'NOT_FOUND', message: 'Admin not found' });
       }
       return reply.send(mapAdminToPublic(admin));
+    },
+  );
+
+  // ───── K8: 2FA (TOTP) management — all protected ─────
+
+  // Map twofa service errors to HTTP. Shared by enable/disable/setup.
+  function twofaError(reply: FastifyReply, err: unknown): FastifyReply | null {
+    if (err instanceof twofa.TotpBadCodeError) {
+      return reply.code(401).send({ error: 'INVALID_TOTP', message: err.message });
+    }
+    if (err instanceof twofa.TotpAlreadyEnabledError) {
+      return reply.code(409).send({ error: 'CONFLICT', message: err.message });
+    }
+    if (err instanceof twofa.TotpNotSetupError) {
+      return reply.code(409).send({ error: 'NOT_SETUP', message: err.message });
+    }
+    return null;
+  }
+
+  app.get(
+    '/api/auth/2fa/status',
+    { onRequest: [requireAuth] },
+    async (request, reply) => reply.send(await twofa.getTotpStatus(request.admin!.id)),
+  );
+
+  // Generate a pending secret + otpauth URI for QR enrollment. Not enforced
+  // until /enable confirms a code.
+  app.post(
+    '/api/auth/2fa/setup',
+    { onRequest: [requireAuth] },
+    async (request, reply) => {
+      try {
+        return reply.send(await twofa.setupTotp(request.admin!.id));
+      } catch (err) {
+        return twofaError(reply, err) ?? Promise.reject(err);
+      }
+    },
+  );
+
+  app.post(
+    '/api/auth/2fa/enable',
+    { onRequest: [requireAuth] },
+    async (request, reply) => {
+      const { code } = TotpCodeSchema.parse(request.body);
+      try {
+        await twofa.enableTotp(request.admin!.id, code);
+        return reply.send({ ok: true, enabled: true });
+      } catch (err) {
+        return twofaError(reply, err) ?? Promise.reject(err);
+      }
+    },
+  );
+
+  app.post(
+    '/api/auth/2fa/disable',
+    { onRequest: [requireAuth] },
+    async (request, reply) => {
+      const { code } = TotpCodeSchema.parse(request.body);
+      try {
+        await twofa.disableTotp(request.admin!.id, code);
+        return reply.send({ ok: true, enabled: false });
+      } catch (err) {
+        return twofaError(reply, err) ?? Promise.reject(err);
+      }
     },
   );
 }

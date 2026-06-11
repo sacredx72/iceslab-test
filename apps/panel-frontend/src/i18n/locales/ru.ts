@@ -498,6 +498,20 @@ export default {
   settings: {
     title: 'Настройки',
     subtitle: 'Бренд, API-токены, регионы',
+    twofa: {
+      title: 'Двухфакторка (2FA)',
+      desc: 'TOTP-код из приложения-аутентификатора (Google Authenticator, Aegis, 1Password) при входе.',
+      on: 'Вкл',
+      off: 'Выкл',
+      enable: 'Включить 2FA',
+      disable: 'Выключить 2FA',
+      confirm: 'Подтвердить',
+      codeLabel: '6-значный код',
+      scanHint: 'Добавь этот секрет в аутентификатор (отсканируй otpauth-URI или введи секрет вручную), затем введи текущий код для подтверждения.',
+      copyUri: 'Скопировать otpauth-URI',
+      enabledNotice: '2FA включена',
+      disabledNotice: '2FA выключена',
+    },
     tokens: {
       title: 'API-токены',
       description: 'Bearer-токены для интеграций (бот, скрипты)',
@@ -838,6 +852,10 @@ export default {
     bootstrapHint: 'У первого админа полный доступ к панели. Выбери надёжный пароль, bootstrap запускается один раз.',
     signInFailed: 'Не удалось войти',
     unknownError: 'Неизвестная ошибка',
+    twofaCodeLabel: 'Код двухфакторки',
+    twofaVerify: 'Подтвердить',
+    twofaTitle: 'Двухфакторка',
+    twofaInvalid: 'Неверный код, попробуй ещё раз',
   },
 
   validation: {

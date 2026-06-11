@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import { Box, Button, PasswordInput, Stack, TextInput, Text, Loader, Center } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery } from '@tanstack/react-query';
+import { isAxiosError } from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { fetchAuthStatus, login, register, type LoginResponse, api } from '../lib/api';
@@ -65,8 +67,12 @@ export function LoginPage() {
     'loginPage.topbarStatusDown'
   );
 
+  // K8 - when the admin has 2FA on, the first login attempt returns
+  // requires2fa; we then reveal a code field and resubmit with it.
+  const [requires2fa, setRequires2fa] = useState(false);
+
   const form = useForm({
-    initialValues: { username: '', password: '' },
+    initialValues: { username: '', password: '', totpCode: '' },
     validate: {
       username: (v) => (v.length < 3 ? t('validation.usernameMin3') : null),
       password: (v) => (v.length < 8 ? t('validation.passwordMin8') : null),
@@ -76,17 +82,42 @@ export function LoginPage() {
   const isBootstrap = statusQuery.data?.registration.enabled ?? false;
 
   const submitMutation = useMutation({
-    mutationFn: async ({ username, password }: { username: string; password: string }) => {
+    mutationFn: async ({
+      username,
+      password,
+      totpCode,
+    }: {
+      username: string;
+      password: string;
+      totpCode: string;
+    }) => {
       if (isBootstrap) {
         await register(username, password);
       }
-      return login(username, password);
+      return login(username, password, totpCode || undefined);
     },
     onSuccess: (data: LoginResponse) => {
+      setRequires2fa(false);
       setSession(data.token, data.admin);
       navigate('/users', { replace: true });
     },
     onError: (err) => {
+      const data = isAxiosError(err)
+        ? (err.response?.data as { requires2fa?: boolean; error?: string } | undefined)
+        : undefined;
+      if (data?.requires2fa) {
+        // Password was correct; reveal the 2FA field (or flag a wrong code).
+        const wasAsking = requires2fa;
+        setRequires2fa(true);
+        if (wasAsking && data.error === 'INVALID_TOTP') {
+          notifications.show({
+            color: 'red',
+            title: t('loginPage.twofaTitle'),
+            message: t('loginPage.twofaInvalid'),
+          });
+        }
+        return;
+      }
       notifications.show({
         color: 'red',
         title: t('loginPage.signInFailed'),
@@ -299,6 +330,18 @@ export function LoginPage() {
                   styles={inputStyles}
                   {...form.getInputProps('password')}
                 />
+                {requires2fa && (
+                  <TextInput
+                    label={t('loginPage.twofaCodeLabel')}
+                    placeholder="123456"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    maxLength={6}
+                    data-autofocus
+                    styles={inputStyles}
+                    {...form.getInputProps('totpCode')}
+                  />
+                )}
                 <Button
                   type="submit"
                   loading={submitMutation.isPending}
@@ -314,7 +357,11 @@ export function LoginPage() {
                     marginTop: 4,
                   }}
                 >
-                  {isBootstrap ? t('loginPage.createAdminAction') : t('loginPage.continueAction')}
+                  {isBootstrap
+                    ? t('loginPage.createAdminAction')
+                    : requires2fa
+                      ? t('loginPage.twofaVerify')
+                      : t('loginPage.continueAction')}
                 </Button>
               </Stack>
             </form>

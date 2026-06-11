@@ -15,6 +15,11 @@ model AdminUser {
   username     String    @unique @db.VarChar(64)
   passwordHash String    @map("password_hash") @db.VarChar(128)
   role         String    @default("admin") @db.VarChar(32)
+  // K8 - 2FA TOTP. `totpSecret` is the base32 secret (set at setup, before
+  // confirmation); `totpEnabled` flips true only after the admin confirms a
+  // valid code, and login enforces a code only when it's true.
+  totpSecret   String?   @map("totp_secret") @db.VarChar(64)
+  totpEnabled  Boolean   @default(false) @map("totp_enabled")
   createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt    DateTime? @map("deleted_at") @db.Timestamptz(6)

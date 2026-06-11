@@ -35,17 +35,23 @@ import {
 } from '@tabler/icons-react';
 import { copyToClipboard } from '../lib/clipboard';
 import {
+  apiErrorMessage,
   createApiToken,
   createRegion,
   deleteApiToken,
   deleteRegion,
+  disable2fa,
+  enable2fa,
+  get2faStatus,
   listApiTokens,
   listRegions,
   getSettings,
+  setup2fa,
   updateRegion,
   updateSettings,
   type ApiToken,
   type Region,
+  type TotpSetup,
 } from '../lib/api';
 
 export function SettingsPage() {
@@ -66,8 +72,151 @@ export function SettingsPage() {
         <CustomizationCard />
         <ApiTokensCard />
       </SimpleGrid>
+      <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="md">
+        <TwoFactorCard />
+      </SimpleGrid>
       <RegionsCard />
     </Stack>
+  );
+}
+
+// ───── K8: 2FA (TOTP) ─────
+
+function TwoFactorCard() {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const statusQuery = useQuery({ queryKey: ['2fa-status'], queryFn: get2faStatus });
+  const enabled = statusQuery.data?.enabled ?? false;
+
+  // Pending enrollment (secret shown, awaiting code confirm).
+  const [setupData, setSetupData] = useState<TotpSetup | null>(null);
+  const [code, setCode] = useState('');
+
+  const fail = (err: unknown) =>
+    notifications.show({ color: 'red', title: t('common.saveError'), message: apiErrorMessage(err) });
+
+  const setupMutation = useMutation({
+    mutationFn: setup2fa,
+    onSuccess: (d) => {
+      setSetupData(d);
+      setCode('');
+    },
+    onError: fail,
+  });
+  const enableMutation = useMutation({
+    mutationFn: () => enable2fa(code),
+    onSuccess: () => {
+      setSetupData(null);
+      setCode('');
+      qc.invalidateQueries({ queryKey: ['2fa-status'] });
+      notifications.show({ color: 'green', message: t('settings.twofa.enabledNotice') });
+    },
+    onError: fail,
+  });
+  const disableMutation = useMutation({
+    mutationFn: () => disable2fa(code),
+    onSuccess: () => {
+      setCode('');
+      qc.invalidateQueries({ queryKey: ['2fa-status'] });
+      notifications.show({ color: 'green', message: t('settings.twofa.disabledNotice') });
+    },
+    onError: fail,
+  });
+
+  const codeValid = /^\d{6}$/.test(code);
+
+  return (
+    <Card withBorder padding="md" radius="md">
+      <Group justify="space-between" mb="md">
+        <Group gap="sm">
+          <ThemeIcon size={32} radius="md" variant="light" color="teal">
+            <IconKey size={16} />
+          </ThemeIcon>
+          <Text fw={600}>{t('settings.twofa.title')}</Text>
+        </Group>
+        <Badge variant="light" color={enabled ? 'teal' : 'gray'} tt="uppercase">
+          {enabled ? t('settings.twofa.on') : t('settings.twofa.off')}
+        </Badge>
+      </Group>
+
+      <Text size="xs" c="dimmed" mb="md">
+        {t('settings.twofa.desc')}
+      </Text>
+
+      {enabled ? (
+        <Stack gap="sm">
+          <TextInput
+            label={t('settings.twofa.codeLabel')}
+            placeholder="123456"
+            inputMode="numeric"
+            maxLength={6}
+            value={code}
+            onChange={(e) => setCode(e.currentTarget.value.replace(/\D/g, ''))}
+          />
+          <Button
+            color="red"
+            variant="light"
+            disabled={!codeValid}
+            loading={disableMutation.isPending}
+            onClick={() => disableMutation.mutate()}
+          >
+            {t('settings.twofa.disable')}
+          </Button>
+        </Stack>
+      ) : setupData ? (
+        <Stack gap="sm">
+          <Text size="xs" c="dimmed">
+            {t('settings.twofa.scanHint')}
+          </Text>
+          <Group gap="xs" wrap="nowrap">
+            <Code style={{ flex: 1, wordBreak: 'break-all' }}>{setupData.secret}</Code>
+            <Tooltip label={t('common.copy')}>
+              <ActionIcon variant="light" onClick={() => copyToClipboard(setupData.secret)}>
+                <IconCopy size={14} />
+              </ActionIcon>
+            </Tooltip>
+          </Group>
+          <Group gap="xs" wrap="nowrap">
+            <Code style={{ flex: 1, wordBreak: 'break-all', fontSize: 10 }}>{setupData.uri}</Code>
+            <Tooltip label={t('settings.twofa.copyUri')}>
+              <ActionIcon variant="light" onClick={() => copyToClipboard(setupData.uri)}>
+                <IconCopy size={14} />
+              </ActionIcon>
+            </Tooltip>
+          </Group>
+          <TextInput
+            label={t('settings.twofa.codeLabel')}
+            placeholder="123456"
+            inputMode="numeric"
+            maxLength={6}
+            value={code}
+            onChange={(e) => setCode(e.currentTarget.value.replace(/\D/g, ''))}
+          />
+          <Group justify="flex-end" gap="xs">
+            <Button variant="default" onClick={() => setSetupData(null)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              color="teal"
+              disabled={!codeValid}
+              loading={enableMutation.isPending}
+              onClick={() => enableMutation.mutate()}
+            >
+              {t('settings.twofa.confirm')}
+            </Button>
+          </Group>
+        </Stack>
+      ) : (
+        <Button
+          variant="light"
+          color="teal"
+          loading={setupMutation.isPending}
+          onClick={() => setupMutation.mutate()}
+        >
+          {t('settings.twofa.enable')}
+        </Button>
+      )}
+    </Card>
   );
 }
 

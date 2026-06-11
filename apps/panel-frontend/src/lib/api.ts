@@ -83,9 +83,42 @@ export async function fetchAuthStatus(): Promise<AuthStatusResponse> {
   return data;
 }
 
-export async function login(username: string, password: string): Promise<LoginResponse> {
-  const { data } = await api.post<LoginResponse>('/api/auth/login', { username, password });
+export async function login(
+  username: string,
+  password: string,
+  totpCode?: string,
+): Promise<LoginResponse> {
+  const { data } = await api.post<LoginResponse>('/api/auth/login', {
+    username,
+    password,
+    ...(totpCode ? { totpCode } : {}),
+  });
   return data;
+}
+
+// ───── K8: 2FA (TOTP) ─────
+
+export interface TotpStatus {
+  enabled: boolean;
+}
+export interface TotpSetup {
+  secret: string;
+  uri: string;
+}
+
+export async function get2faStatus(): Promise<TotpStatus> {
+  const { data } = await api.get<TotpStatus>('/api/auth/2fa/status');
+  return data;
+}
+export async function setup2fa(): Promise<TotpSetup> {
+  const { data } = await api.post<TotpSetup>('/api/auth/2fa/setup');
+  return data;
+}
+export async function enable2fa(code: string): Promise<void> {
+  await api.post('/api/auth/2fa/enable', { code });
+}
+export async function disable2fa(code: string): Promise<void> {
+  await api.post('/api/auth/2fa/disable', { code });
 }
 
 export async function register(username: string, password: string): Promise<RegisterResponse> {

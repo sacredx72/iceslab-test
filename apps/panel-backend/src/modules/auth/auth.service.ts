@@ -6,6 +6,7 @@ import {
 import type { LoginInput } from './auth.schemas.js';
 import { redis } from '../../lib/redis.js';
 import { config } from '../../config.js';
+import { verifyTotp } from '../../lib/totp.js';
 
 export class InvalidCredentialsError extends Error {
   constructor() {
@@ -18,6 +19,24 @@ export class AccountLockedError extends Error {
   constructor(public retryAfterSeconds: number) {
     super(`Account temporarily locked. Retry in ~${retryAfterSeconds}s`);
     this.name = 'AccountLockedError';
+  }
+}
+
+// K8 - the admin has 2FA enabled but didn't supply a code yet. The route turns
+// this into a non-fatal "now ask for the code" response, NOT a credentials
+// error (password was already validated at this point).
+export class TotpRequiredError extends Error {
+  constructor() {
+    super('Two-factor code required');
+    this.name = 'TotpRequiredError';
+  }
+}
+
+// K8 - 2FA enabled and a code was supplied but it didn't verify.
+export class InvalidTotpError extends Error {
+  constructor() {
+    super('Invalid two-factor code');
+    this.name = 'InvalidTotpError';
   }
 }
 
@@ -90,6 +109,19 @@ export async function login(input: LoginInput, clientIp: string): Promise<AdminU
   if (!ok) {
     await recordFailure(clientIp, input.username);
     throw new InvalidCredentialsError();
+  }
+
+  // K8 - second factor. Only enforced when the admin enabled 2FA. A missing
+  // code asks the UI to prompt (the password was already correct, so we don't
+  // burn a lockout slot for that); a wrong code IS a failed attempt.
+  if (admin.totpEnabled && admin.totpSecret) {
+    if (!input.totpCode) {
+      throw new TotpRequiredError();
+    }
+    if (!verifyTotp(admin.totpSecret, input.totpCode)) {
+      await recordFailure(clientIp, input.username);
+      throw new InvalidTotpError();
+    }
   }
 
   await clearFailures(clientIp, input.username);
