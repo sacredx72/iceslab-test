@@ -31,7 +31,6 @@ import {
   createBinding,
   createNode,
   deleteNode,
-  getDashboardOverview,
   listNodes,
   listRegions,
   refreshNodeBootstrap,
@@ -40,6 +39,7 @@ import {
   type Node,
   type UpdateNodeInput,
 } from '../lib/api';
+import { useOverview } from '../hooks/useOverview';
 import { NodeFormModal } from '../components/NodeFormModal';
 import { NodeEditModal } from '../components/NodeEditModal';
 import { NodePayloadModal } from '../components/NodePayloadModal';
@@ -122,11 +122,7 @@ export function NodesPage() {
   // Pull live metrics from dashboard endpoint - already provides cpu/ram/disk
   // per node + today's traffic + inboundCount. Refetch every 15s to keep
   // cards in sync with the agent metrics-poll cron.
-  const overviewQuery = useQuery({
-    queryKey: ['dashboard', 'overview'],
-    queryFn: getDashboardOverview,
-    refetchInterval: 15_000,
-  });
+  const overviewQuery = useOverview();
 
   // Merge raw nodes (canonical source for actions / address) with dashboard
   // metrics (CPU/RAM/disk/today). Indexed by id for O(1) join.

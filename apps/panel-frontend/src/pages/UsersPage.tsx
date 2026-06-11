@@ -43,7 +43,6 @@ import {
   createUser,
   deleteUser,
   fetchAuthStatus,
-  getDashboardOverview,
   listSquads,
   listUsers,
   subscriptionUrl,
@@ -52,6 +51,7 @@ import {
   type UpdateUserInput,
   type User,
 } from '../lib/api';
+import { useOverview } from '../hooks/useOverview';
 import { UserFormModal } from '../components/UserFormModal';
 import { PageHero } from '../components/PageHero';
 import { PrimaryButton } from '../components/PrimaryButton';
@@ -252,11 +252,7 @@ export function UsersPage() {
   // Wave-14 #17: full-install counters come from dashboard.users (cached
   // server-side, ~ N/A cost) instead of computed from the current page slice
   // — the slice doesn't reflect total install state under server pagination.
-  const dashQuery = useQuery({
-    queryKey: ['dashboard', 'overview'],
-    queryFn: getDashboardOverview,
-    staleTime: 10_000,
-  });
+  const dashQuery = useOverview();
   const squadNameById = useMemo(() => {
     const m = new Map<string, string>();
     for (const s of squadsQuery.data?.squads ?? []) m.set(s.id, s.name);

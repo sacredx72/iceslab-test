@@ -15,7 +15,7 @@ import {
   Title,
   Tooltip,
 } from '@mantine/core';
-import { useQuery } from '@tanstack/react-query';
+import { useOverview } from '../hooks/useOverview';
 import {
   IconActivity,
   IconArrowDownRight,
@@ -32,7 +32,7 @@ import {
   IconUsers,
   IconWifi,
 } from '@tabler/icons-react';
-import { getDashboardOverview, type DashboardOverview } from '../lib/api';
+import { type DashboardOverview } from '../lib/api';
 import { PageHero } from '../components/PageHero';
 
 const HAIRLINE = '#1C2A3D';
@@ -207,11 +207,7 @@ function Sparkline({ data, height = 110 }: { data: { hour: string; bytes: number
 
 export function DashboardPage() {
   const { t } = useTranslation();
-  const { data, isLoading, isError } = useQuery({
-    queryKey: ['dashboard', 'overview'],
-    queryFn: getDashboardOverview,
-    refetchInterval: 10_000,
-  });
+  const { data, isLoading, isError } = useOverview();
 
   if (isLoading) {
     return (

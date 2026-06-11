@@ -40,7 +40,6 @@ import {
 import {
   createBinding,
   deleteBinding,
-  getDashboardOverview,
   listBindings,
   listProfiles,
   listRegions,
@@ -50,6 +49,7 @@ import {
   type NodeProtocol,
   type UpdateNodeInput,
 } from '../lib/api';
+import { useOverview } from '../hooks/useOverview';
 import { COUNTRY_OPTIONS, countryFlag } from '../lib/countries';
 import { parseNodeAgentPort, pickFreeQuickDeployPort } from '../lib/ports';
 import { HostsManager } from './HostsManager';
@@ -169,11 +169,7 @@ export function NodeEditModal({
   // (the only entry point to this modal) already polls the SAME cache key
   // at 15s, so the modal's poll was net-burst on the dashboard endpoint
   // for no UX gain. Modal piggybacks on parent's interval via shared cache.
-  const overviewQuery = useQuery({
-    queryKey: ['dashboard', 'overview'],
-    queryFn: getDashboardOverview,
-    enabled: opened,
-  });
+  const overviewQuery = useOverview({ enabled: opened });
   const overviewNode = overviewQuery.data?.nodes.find((n) => n.id === node?.id);
 
   // Bindings deployed on this node (with profile info inlined - `listBindings`

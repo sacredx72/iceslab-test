@@ -20,7 +20,8 @@ import {
 import { useAuth } from '../stores/auth';
 import { useBrandName } from '../hooks/useBrandName';
 import { LanguageSwitcher } from './LanguageSwitcher';
-import { getDashboardOverview, getSystemVersion } from '../lib/api';
+import { getSystemVersion } from '../lib/api';
+import { useOverview } from '../hooks/useOverview';
 
 const HAIRLINE = '#1C2A3D';
 const GROUND = '#08101A';
@@ -182,12 +183,7 @@ export function AppLayout() {
   // carries `inventory.{profileCount,squadCount}` alongside the existing
   // users.total and system.{total,online}NodeCount, all from the same
   // Redis-cached blob.
-  const dashQuery = useQuery({
-    queryKey: ['dashboard', 'overview'],
-    queryFn: getDashboardOverview,
-    refetchInterval: 30_000,
-    staleTime: 10_000,
-  });
+  const dashQuery = useOverview();
 
   // ROADMAP D1 — update-available check. Cheap: the backend caches the GitHub
   // call for 6h, so a long staleTime + a couple of refetches a day is plenty.
