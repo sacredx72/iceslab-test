@@ -1019,6 +1019,32 @@ export async function getDashboardOverview(): Promise<DashboardOverview> {
   return data;
 }
 
+// ───── K1-b/c Insights (SRH + HWID inspectors) ─────
+
+export interface Insights {
+  windowDays: number;
+  subRequests: {
+    total: number;
+    uniqueUsers: number;
+    byClient: { client: string; count: number }[];
+    byHourUtc: number[];
+  };
+  hwid: {
+    totalDevices: number;
+    usersWithDevices: number;
+    avgDevicesPerUser: number;
+    distribution: { bucket: string; users: number }[];
+    atOrOverLimit: number;
+  };
+}
+
+/** On-demand analytics over stored subscription-request + HWID data. `days`
+ *  bounds the request-history window (HWID stats are point-in-time). */
+export async function getInsights(days: number): Promise<Insights> {
+  const { data } = await api.get<Insights>('/api/dashboard/insights', { params: { days } });
+  return data;
+}
+
 // ───── Settings ─────
 
 export interface PublicSettings {

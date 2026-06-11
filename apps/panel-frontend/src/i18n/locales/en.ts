@@ -54,6 +54,7 @@ export default {
     subscriptionMetadata: 'Metadata',
     subscriptionRouting: 'Routing',
     systemGroup: 'System',
+    insights: 'Insights',
     searchPlaceholder: 'Search anything',
     updateAvailable: 'Update available: {{version}}',
   },
@@ -66,6 +67,7 @@ export default {
     nodes: '/ NODES',
     subscriptionMetadata: '/ SUBSCRIPTION · METADATA',
     subscriptionRouting: '/ SUBSCRIPTION · ROUTING',
+    insights: '/ SYSTEM · INSIGHTS',
     settings: '/ SETTINGS',
   },
   login: {
@@ -737,6 +739,10 @@ export default {
     srrLabelMany: 'rules',
     srrTitle: 'Subscription Rules.',
     settingsEyebrow: 'Panel config',
+    insightsEyebrow: 'Analytics · stored data',
+    insightsTitle: 'Insights.',
+    insightsSubtitle:
+      'Who fetches the subscription, with which client, and when - plus device tracking from HWID. Computed on demand from data the panel already keeps, no extra collection.',
     subscriptionMetadataEyebrow: 'Subscription · client-facing headers',
     subscriptionMetadataTitle: 'Metadata.',
     subscriptionMetadataSubtitle:
@@ -756,6 +762,30 @@ export default {
     hostSystemSubtitle: 'panel server',
     uptimeLabel: 'Uptime',
     sampledLabel: 'Sampled',
+  },
+
+  insights: {
+    window7d: '7d',
+    window30d: '30d',
+    window90d: '90d',
+    srrTitle: 'Subscription requests',
+    srrSubtitle: 'Polls of the subscription URL in the selected window',
+    totalRequests: 'Requests',
+    uniqueUsers: 'Unique users',
+    byClient: 'By client',
+    byHour: 'By hour (UTC)',
+    noRequests: 'No subscription requests in this window yet.',
+    hwidTitle: 'Devices (HWID)',
+    hwidSubtitle: 'Physical client devices seen fetching a subscription',
+    totalDevices: 'Tracked devices',
+    usersWithDevices: 'Users with devices',
+    avgPerUser: 'Avg per user',
+    atLimit: 'At/over limit',
+    distribution: 'Devices per user',
+    devicesBucket: '{{bucket}} devices',
+    usersCount_one: '{{count}} user',
+    usersCount_other: '{{count}} users',
+    noDevices: 'No devices tracked yet.',
   },
 
   modal: {

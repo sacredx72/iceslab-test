@@ -11,6 +11,7 @@ import {
   IconStack2,
   IconUsersGroup,
   IconLayoutDashboard,
+  IconChartHistogram,
   IconHourglass,
   IconSettings,
   IconSearch,
@@ -162,6 +163,7 @@ const BREADCRUMB_KEYS: Record<string, string> = {
   '/nodes': 'breadcrumb.nodes',
   '/subscription/metadata': 'breadcrumb.subscriptionMetadata',
   '/subscription/routing': 'breadcrumb.subscriptionRouting',
+  '/insights': 'breadcrumb.insights',
   '/settings': 'breadcrumb.settings',
 };
 
@@ -451,6 +453,11 @@ export function AppLayout() {
               {t('sidebar.systemGroup')}
             </Text>
             <Stack gap={2} px={8}>
+              <NavItem
+                to="/insights"
+                label={t('sidebar.insights')}
+                icon={IconChartHistogram}
+              />
               <NavItem
                 href="/admin/queues"
                 label={t('sidebar.queues')}

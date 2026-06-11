@@ -3,6 +3,7 @@ import { AppLayout } from './components/AppLayout';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { LoginPage } from './pages/LoginPage';
 import { DashboardPage } from './pages/DashboardPage';
+import { InsightsPage } from './pages/InsightsPage';
 import { UsersPage } from './pages/UsersPage';
 import { NodesPage } from './pages/NodesPage';
 import { SrrPage } from './pages/SrrPage';
@@ -26,6 +27,7 @@ export default function App() {
               existing bookmarks don't 404. */}
           <Route path="/inbounds" element={<Navigate to="/profiles" replace />} />
           <Route path="/squads" element={<SquadsPage />} />
+          <Route path="/insights" element={<InsightsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/subscription/metadata" element={<SubscriptionMetadataPage />} />
           <Route path="/subscription/routing" element={<SrrPage />} />

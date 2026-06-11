@@ -56,6 +56,7 @@ export default {
     subscriptionMetadata: 'Метаданные',
     subscriptionRouting: 'Маршрутизация',
     systemGroup: 'Система',
+    insights: 'Аналитика',
     searchPlaceholder: 'Поиск…',
     updateAvailable: 'Доступно обновление: {{version}}',
   },
@@ -68,6 +69,7 @@ export default {
     nodes: '/ НОДЫ',
     subscriptionMetadata: '/ ПОДПИСКА · МЕТАДАННЫЕ',
     subscriptionRouting: '/ ПОДПИСКА · МАРШРУТИЗАЦИЯ',
+    insights: '/ СИСТЕМА · АНАЛИТИКА',
     settings: '/ НАСТРОЙКИ',
   },
   login: {
@@ -733,6 +735,10 @@ export default {
     srrLabelMany: 'правил',
     srrTitle: 'Маршрутизация.',
     settingsEyebrow: 'Конфиг панели',
+    insightsEyebrow: 'Аналитика · хранимые данные',
+    insightsTitle: 'Аналитика.',
+    insightsSubtitle:
+      'Кто запрашивает подписку, каким клиентом и когда - плюс учёт устройств по HWID. Считается по запросу из данных, которые панель и так хранит, без дополнительного сбора.',
     subscriptionMetadataEyebrow: 'Подписка · заголовки для клиента',
     subscriptionMetadataTitle: 'Метаданные.',
     subscriptionMetadataSubtitle:
@@ -752,6 +758,31 @@ export default {
     hostSystemSubtitle: 'хост-сервер',
     uptimeLabel: 'Uptime',
     sampledLabel: 'Sampled',
+  },
+
+  insights: {
+    window7d: '7д',
+    window30d: '30д',
+    window90d: '90д',
+    srrTitle: 'Запросы подписки',
+    srrSubtitle: 'Обращения к URL подписки за выбранный период',
+    totalRequests: 'Запросов',
+    uniqueUsers: 'Уникальных юзеров',
+    byClient: 'По клиентам',
+    byHour: 'По часам (UTC)',
+    noRequests: 'За этот период запросов подписки ещё не было.',
+    hwidTitle: 'Устройства (HWID)',
+    hwidSubtitle: 'Физические клиентские устройства, тянувшие подписку',
+    totalDevices: 'Устройств учтено',
+    usersWithDevices: 'Юзеров с устройствами',
+    avgPerUser: 'В среднем на юзера',
+    atLimit: 'На лимите/выше',
+    distribution: 'Устройств на юзера',
+    devicesBucket: '{{bucket}} устройств',
+    usersCount_one: '{{count}} юзер',
+    usersCount_few: '{{count}} юзера',
+    usersCount_many: '{{count}} юзеров',
+    noDevices: 'Устройства пока не учтены.',
   },
 
   modal: {
