@@ -592,6 +592,18 @@ export default {
         details:
           "Trojan via xray-core + REALITY. Users authenticate with a password (we reuse user.xrayUuid as the password). On bad auth the server returns a real HTTPS response from the decoy site - anti-probe defence. No Vision (Trojan doesn't support it). Useful for legacy clients that don't understand VLESS.",
       },
+      'xray-reality-grpc-ru': {
+        name: 'REALITY + gRPC (RU masquerade)',
+        description: 'Decoy as a Russian CDN, for RU where cloudflare SNI is cut',
+        details:
+          'VLESS + REALITY + gRPC with serverName masqueraded as a major Russian CDN (Yandex avatars). Russian TSPU filters by SNI and targets cloudflare/foreign names, while a Russian CDN domain passes, plus a huge volume of legit traffic to hide in. Fingerprint firefox ("loyal" to TSPU JA3/JA4; chrome gets flagged). gRPC over raw: HTTP/2 framing is harder to fingerprint as a proxy. Mirrors live RU configs from 2026. NOTE: a single foreign node still dies under a whitelist shutdown; for shutdowns you need a cascade with a RU entry.',
+        notes: [
+          'serverName as a Russian CDN (avatars.mds.yandex.net); alternative ads.x5.ru. The node must reach dest:443 over TLS 1.3',
+          'fingerprint firefox: chrome is flagged as suspicious by Russian TSPU',
+          'serviceName is randomised so it does not fingerprint Iceslab',
+          'Under a whitelist shutdown a foreign node will not save you - you need a cascade with a RU entry',
+        ],
+      },
       'hysteria-default': {
         name: 'Hysteria 2 (clean)',
         description: 'UDP, low latency, no obfs - for free regions',

@@ -66,6 +66,14 @@ function randPath(): string {
   return `/${a}`;
 }
 
+// gRPC serviceName. Random so a static name (e.g. the "grpc-vk" seen in live
+// RU configs) doesn't fingerprint every Iceslab RU node identically via the
+// subscription URI. The name rides inside the REALITY-encrypted stream and is
+// invisible to DPI, so randomising costs no camouflage and removes the tell.
+function randServiceName(): string {
+  return Math.random().toString(36).slice(2, 10);
+}
+
 // AmneziaWG H1-H4 magic-header bytes. Spec requires > 4 + pairwise unique
 // + random within int32, a hardcoded 100/200/300/400 fingerprints every
 // "Iran-tuned recipe" deploy as Iceslab. Roll fresh on apply.
@@ -161,6 +169,32 @@ export const RECIPES: Recipe[] = [
       xrayServerNames: 'www.cloudflare.com',
       xrayFingerprint: 'chrome',
     },
+  },
+  {
+    id: 'xray-reality-grpc-ru',
+    protocol: 'xray',
+    emoji: '🇷🇺',
+    name: 'REALITY + gRPC (RU-маскировка)',
+    description: 'Декой под русский CDN, для РФ где cloudflare-SNI режут',
+    details:
+      'VLESS + REALITY + gRPC, serverName маскируется под крупный русский CDN (Yandex avatars). РФ-ТСПУ фильтрует по SNI и таргетит cloudflare/зарубежные имена, а русский CDN-домен проходит, плюс огромный объём легитимного трафика для маскировки. Fingerprint firefox ("лояльный" для ТСПУ JA3/JA4; chrome помечается подозрительным). gRPC вместо raw: HTTP/2-фрейминг сложнее зафингерпринтить как прокси. Повторяет рабочие РФ-конфиги 2026. ВНИМАНИЕ: одиночная зарубежная нода под whitelist-shutdown всё равно ляжет, для отключений нужен каскад с RU-входом.',
+    dpiResistance: 5,
+    speed: 4,
+    apply: () => ({
+      xraySubprotocol: 'vless',
+      xrayFlow: '',
+      xrayNetwork: 'grpc',
+      xrayServiceName: randServiceName(),
+      xrayDest: 'avatars.mds.yandex.net:443',
+      xrayServerNames: 'avatars.mds.yandex.net',
+      xrayFingerprint: 'firefox',
+    }),
+    notes: [
+      'serverName под русский CDN (avatars.mds.yandex.net); альтернатива ads.x5.ru. Нода должна дотягиваться до dest:443 по TLS 1.3',
+      'fingerprint firefox: chrome помечается РФ-ТСПУ как подозрительный',
+      'serviceName рандомизирован, чтобы не фингерпринтить Iceslab',
+      'Под whitelist-shutdown (отключения) зарубежная нода не спасёт - нужен каскад с RU-входом',
+    ],
   },
 
   // ───── Hysteria (2) ─────
