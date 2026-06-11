@@ -45,8 +45,10 @@ export class ProfileNameTakenError extends Error {
   }
 }
 export class PortInUseError extends Error {
-  constructor(public nodeId: string, public port: number) {
-    super(`Port ${port} already bound on node ${nodeId}`);
+  constructor(public port: number, nodeName: string, conflictProfile: string) {
+    super(
+      `Port ${port} on node "${nodeName}" is already used by profile "${conflictProfile}". Pick a different port.`,
+    );
     this.name = 'PortInUseError';
   }
 }
@@ -205,8 +207,9 @@ export async function createBinding(input: CreateBindingInput): Promise<PublicBi
   // Pre-flight uniqueness checks for friendlier error messages.
   const portConflict = await prisma.profileNodeBinding.findUnique({
     where: { nodeId_port: { nodeId: input.nodeId, port: input.port } },
+    include: { profile: { select: { name: true } } },
   });
-  if (portConflict) throw new PortInUseError(input.nodeId, input.port);
+  if (portConflict) throw new PortInUseError(input.port, node.name, portConflict.profile.name);
   const dupBinding = await prisma.profileNodeBinding.findUnique({
     where: {
       profileId_nodeId: { profileId: input.profileId, nodeId: input.nodeId },
@@ -266,9 +269,13 @@ export async function updateBinding(
   if (input.port !== undefined && input.port !== existing.port) {
     const portConflict = await prisma.profileNodeBinding.findUnique({
       where: { nodeId_port: { nodeId: existing.nodeId, port: input.port } },
+      include: {
+        profile: { select: { name: true } },
+        node: { select: { name: true } },
+      },
     });
     if (portConflict && portConflict.id !== id) {
-      throw new PortInUseError(existing.nodeId, input.port);
+      throw new PortInUseError(input.port, portConflict.node.name, portConflict.profile.name);
     }
   }
 

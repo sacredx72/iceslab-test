@@ -18,6 +18,7 @@ import { notifications } from '@mantine/notifications';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { IconRocket, IconServer2 } from '@tabler/icons-react';
 import {
+  apiErrorMessage,
   createBinding,
   deleteBinding,
   listBindings,
@@ -125,7 +126,7 @@ export function DeployProfileModal({ profile, onClose }: Props) {
       notifications.show({
         color: 'red',
         title: t('common.saveError'),
-        message: err instanceof Error ? err.message : String(err),
+        message: apiErrorMessage(err),
       }),
   });
 

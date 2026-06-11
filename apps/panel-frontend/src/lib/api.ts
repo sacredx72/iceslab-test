@@ -34,6 +34,23 @@ api.interceptors.response.use(
   },
 );
 
+/**
+ * F-P1 - extract a human-readable message from a failed request: the backend's
+ * `{ message }` (Fastify error shape) when present, else the Error message,
+ * else String(err). Use in mutation `onError` handlers so operators see e.g.
+ * `Port 443 on node "xray" is already used by profile "xray"` instead of the
+ * generic axios `Request failed with status code 409`.
+ */
+export function apiErrorMessage(err: unknown): string {
+  if (axios.isAxiosError(err)) {
+    const data = err.response?.data as { message?: string; error?: string } | undefined;
+    if (data?.message) return data.message;
+    if (data?.error) return data.error;
+    return err.message;
+  }
+  return err instanceof Error ? err.message : String(err);
+}
+
 // ───── Typed helpers for the endpoints we know about ─────
 
 export interface AuthStatusResponse {
