@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { ROUTING_PRESET_IDS } from '@iceslab/shared';
 import { requireAuth } from '../auth/auth.hook.js';
 import { prisma } from '../../prisma.js';
+import { invalidateSubscriptionSettingsCache } from './settings.service.js';
 
 /**
  * Panel-wide settings (brand name, future feature flags). Two surfaces:
@@ -80,6 +81,8 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
           update: { value: jsonValue },
         });
       }
+      // B5 - bust the /sub settings cache so admin changes take effect now.
+      invalidateSubscriptionSettingsCache();
       return reply.send({ ok: true, updated: entries.map(([k]) => k) });
     });
   });

@@ -19,12 +19,27 @@ export interface SubscriptionSettings {
   routingPreset: RoutingPresetId;
 }
 
+// B5 - in-process cache for the subscription settings. `/sub/:token` is hit on
+// every client poll (every few minutes per device) and each call read the WHOLE
+// app_settings table. Settings change rarely and only via PUT /api/settings, so
+// cache the projected DTO for a short TTL and bust it on write
+// (invalidateSubscriptionSettingsCache) for instant admin feedback.
+const SETTINGS_CACHE_TTL_MS = 60_000;
+let settingsCache: { value: SubscriptionSettings; expiresAt: number } | null = null;
+
+/** Clear the subscription-settings cache. Call after any settings write. */
+export function invalidateSubscriptionSettingsCache(): void {
+  settingsCache = null;
+}
+
 /**
  * Pull all settings rows once and project the subset the subscription
- * pipeline cares about. Cached at the call-site if needed (we only read
- * once per /sub/:token request).
+ * pipeline cares about. Cached in-process (B5) with a short TTL + write-bust.
  */
 export async function getSubscriptionSettings(): Promise<SubscriptionSettings> {
+  if (settingsCache && Date.now() < settingsCache.expiresAt) {
+    return settingsCache.value;
+  }
   const rows = await prisma.appSetting.findMany();
   const map = new Map<string, unknown>(rows.map((r) => [r.key, r.value]));
 
@@ -42,7 +57,7 @@ export async function getSubscriptionSettings(): Promise<SubscriptionSettings> {
   // 'proxy-all' (legacy behaviour) so a hand-edited row can never break /sub.
   const routingRaw = map.get('subscriptionRoutingPreset');
 
-  return {
+  const value: SubscriptionSettings = {
     profileTitle: asString('subscriptionProfileTitle'),
     updateIntervalHours: asInt('subscriptionUpdateIntervalHours', 24),
     supportUrl: asString('subscriptionSupportUrl'),
@@ -50,6 +65,8 @@ export async function getSubscriptionSettings(): Promise<SubscriptionSettings> {
     brandName: asString('brandName'),
     routingPreset: isRoutingPresetId(routingRaw) ? routingRaw : 'proxy-all',
   };
+  settingsCache = { value, expiresAt: Date.now() + SETTINGS_CACHE_TTL_MS };
+  return value;
 }
 
 /**
