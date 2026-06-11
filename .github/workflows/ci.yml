@@ -24,7 +24,10 @@ jobs:
     # logic for BullMQ which mounts on Redis at import time.
     services:
       postgres:
-        image: postgres:16
+        # I8 - match prod (postgres:16-alpine). Debian `postgres:16` and the
+        # alpine image occasionally differ in collation / default settings;
+        # testing on the same image we ship removes that drift.
+        image: postgres:16-alpine
         env:
           POSTGRES_USER: ice
           POSTGRES_PASSWORD: ice
@@ -172,6 +175,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
 
       - name: Build + push
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.image.context }}
@@ -183,3 +187,16 @@ jobs:
           # builds dramatically without needing a paid registry tier.
           cache-from: type=gha,scope=${{ matrix.image.name }}
           cache-to: type=gha,scope=${{ matrix.image.name }},mode=max
+
+      # I7 - scan the published image for OS-package vulns the npm-audit gate
+      # can't see (alpine packages, the Go runtime base, etc). `ignore-unfixed`
+      # keeps it actionable: it only fails when a fix is actually available to
+      # bump to, so unpatched upstream base CVEs don't wedge every deploy.
+      - name: Trivy image scan (HIGH,CRITICAL, fixable)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ghcr.io/${{ github.repository_owner }}/${{ matrix.image.name }}@${{ steps.build.outputs.digest }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+          vuln-type: os,library
