@@ -1,3 +1,4 @@
+import type { RoutingPresetId } from '@iceslab/shared';
 import type { SubscriptionEndpoint } from '../subscription.formats.js';
 
 /**
@@ -38,7 +39,63 @@ export interface SingboxBuildOpts {
   bundle?: 'selector' | 'url-test';
   urltestIntervalSec?: number;
   urltestProbeUrl?: string;
+  routingPreset?: RoutingPresetId;
 }
+
+/**
+ * Routing Templates (R1b) - `routingPreset: 'ru-split'` adds `route.rules` +
+ * `route.rule_set` ahead of `route.final`: ads/malware rejected, RU domains
+ * and RU/private IPs direct, everything else falls through to the tunnel.
+ *
+ * sing-box removed geosite:/geoip: in 1.12, so the only portable vehicle is
+ * remote rule-sets (.srs) from the SagerNet-published repos. We deliberately
+ * do NOT emit `download_detour`: it is deprecated since 1.14, and redundant
+ * here - until a rule-set is downloaded its rules cannot match, so the
+ * download itself falls through `route.final` and rides the tunnel. We also
+ * skip `experimental.cache_file` (rule-set caching) to keep the "client app
+ * fills in the rest" contract; the .srs files are small and re-fetch cheaply.
+ *
+ * Rules use the modern `action:` form (rule `outbound` is deprecated since
+ * 1.11), so the ru-split preset needs sing-box 1.11+. With the default
+ * 'proxy-all' preset the output stays byte-identical to pre-R1 builds and
+ * keeps working on 1.10.
+ */
+const RU_SPLIT_RULE_SETS: ReadonlyArray<Record<string, unknown>> = [
+  {
+    type: 'remote',
+    tag: 'geosite-category-ads-all',
+    format: 'binary',
+    url: 'https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ads-all.srs',
+  },
+  {
+    type: 'remote',
+    tag: 'geosite-category-ru',
+    format: 'binary',
+    url: 'https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ru.srs',
+  },
+  {
+    type: 'remote',
+    tag: 'geosite-category-gov-ru',
+    format: 'binary',
+    url: 'https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-gov-ru.srs',
+  },
+  {
+    type: 'remote',
+    tag: 'geoip-ru',
+    format: 'binary',
+    url: 'https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-ru.srs',
+  },
+];
+
+const RU_SPLIT_RULES: ReadonlyArray<Record<string, unknown>> = [
+  { rule_set: ['geosite-category-ads-all'], action: 'reject' },
+  { ip_is_private: true, action: 'route', outbound: 'direct' },
+  {
+    rule_set: ['geosite-category-ru', 'geosite-category-gov-ru', 'geoip-ru'],
+    action: 'route',
+    outbound: 'direct',
+  },
+];
 
 export function buildSingboxJson(
   endpoints: SubscriptionEndpoint[],
@@ -46,6 +103,7 @@ export function buildSingboxJson(
 ): string {
   const outbounds: Record<string, unknown>[] = [];
   const proxyTags: string[] = [];
+  const ruSplit = (opts.routingPreset ?? 'proxy-all') === 'ru-split';
 
   for (const e of endpoints) {
     const tag = `${e.nodeName}-${e.protocol}`;
@@ -221,6 +279,9 @@ export function buildSingboxJson(
     log: { level: 'info', timestamp: true },
     outbounds,
     route: {
+      ...(ruSplit
+        ? { rules: RU_SPLIT_RULES, rule_set: RU_SPLIT_RULE_SETS }
+        : {}),
       final: primaryTag,
       auto_detect_interface: true,
     },

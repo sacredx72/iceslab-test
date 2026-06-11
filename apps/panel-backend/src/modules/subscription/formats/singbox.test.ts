@@ -223,4 +223,70 @@ describe('buildSingboxJson', () => {
     const v = cfg.outbounds.find((o: any) => o.type === 'vless');
     expect(v.transport).toBeUndefined();
   });
+
+  // ───── Routing Templates (R1b) ─────
+
+  describe('routingPreset', () => {
+    it('default proxy-all output is byte-identical to pre-R1 (no rules / rule_set)', () => {
+      expect(buildSingboxJson([xrayEp], { routingPreset: 'proxy-all' })).toBe(
+        buildSingboxJson([xrayEp]),
+      );
+      const cfg = parse(buildSingboxJson([xrayEp]));
+      expect(cfg.route.rules).toBeUndefined();
+      expect(cfg.route.rule_set).toBeUndefined();
+    });
+
+    it('ru-split emits four remote binary rule-sets without download_detour', () => {
+      const cfg = parse(buildSingboxJson([xrayEp], { routingPreset: 'ru-split' }));
+      const sets = cfg.route.rule_set;
+      expect(sets.map((s: any) => s.tag)).toEqual([
+        'geosite-category-ads-all',
+        'geosite-category-ru',
+        'geosite-category-gov-ru',
+        'geoip-ru',
+      ]);
+      for (const s of sets) {
+        expect(s.type).toBe('remote');
+        expect(s.format).toBe('binary');
+        expect(s.url).toMatch(
+          /^https:\/\/raw\.githubusercontent\.com\/SagerNet\/sing-(geosite|geoip)\/rule-set\/.+\.srs$/,
+        );
+        // Deprecated since sing-box 1.14 and redundant: until the rule-set
+        // is downloaded its rules cannot match, so the fetch rides final.
+        expect(s.download_detour).toBeUndefined();
+      }
+    });
+
+    it('ru-split rules: reject ads, direct private IPs and RU, final stays Auto', () => {
+      const cfg = parse(buildSingboxJson([xrayEp], { routingPreset: 'ru-split' }));
+      const rules = cfg.route.rules;
+      expect(rules).toHaveLength(3);
+      expect(rules[0]).toEqual({
+        rule_set: ['geosite-category-ads-all'],
+        action: 'reject',
+      });
+      expect(rules[1]).toEqual({
+        ip_is_private: true,
+        action: 'route',
+        outbound: 'direct',
+      });
+      expect(rules[2]).toEqual({
+        rule_set: ['geosite-category-ru', 'geosite-category-gov-ru', 'geoip-ru'],
+        action: 'route',
+        outbound: 'direct',
+      });
+      expect(cfg.route.final).toBe('Auto');
+    });
+
+    it('ru-split composes with bundle=url-test (rules present, final = Auto-URLTest)', () => {
+      const cfg = parse(
+        buildSingboxJson([xrayEp], {
+          bundle: 'url-test',
+          routingPreset: 'ru-split',
+        }),
+      );
+      expect(cfg.route.rules).toHaveLength(3);
+      expect(cfg.route.final).toBe('Auto-URLTest');
+    });
+  });
 });

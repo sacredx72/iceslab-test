@@ -468,7 +468,7 @@ export async function subscriptionRoutes(app: FastifyInstance): Promise<void> {
               : undefined;
           return reply
             .type('application/json')
-            .send(buildSingboxJson(filtered, { bundle: sbBundle }));
+            .send(buildSingboxJson(filtered, { bundle: sbBundle, routingPreset }));
         }
         case 'wgconf':
           // Content-Disposition with .conf suffix so browser saves the
