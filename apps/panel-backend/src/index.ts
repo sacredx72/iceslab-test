@@ -7,6 +7,7 @@ import { closeNodeTransport } from './modules/nodes/nodes.transport.js';
 import { registerUserEventHandlers } from './modules/users/users.events.js';
 import { registerNodeEventHandlers } from './modules/nodes/nodes.events.js';
 import { registerInboundEventHandlers } from './modules/inbounds/inbounds.events.js';
+import { registerWebhookEventHandlers } from './modules/webhooks/webhook.events.js';
 import { startNodeUsersWorker } from './modules/users/users.queue.js';
 import { startInboundSyncWorker } from './modules/inbounds/inbounds.queue.js';
 import {
@@ -39,6 +40,7 @@ async function start() {
     registerUserEventHandlers();
     registerNodeEventHandlers();
     registerInboundEventHandlers();
+    registerWebhookEventHandlers();
     nodeUsersWorker = startNodeUsersWorker();
     inboundSyncWorker = startInboundSyncWorker();
     cronTasksWorker = startCronTasksWorker();

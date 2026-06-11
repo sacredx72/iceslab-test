@@ -84,6 +84,30 @@ const ConfigSchema = z.object({
   RATE_LIMIT_BOOTSTRAP_PER_MIN: z.coerce.number().int().min(1).default(10),
   RATE_LIMIT_HEARTBEAT_PER_MIN: z.coerce.number().int().min(1).default(120),
 
+  // K2 — outbound webhook bus. Domain events (user / profile / binding / node
+  // lifecycle) are POSTed as signed JSON to these URLs so third parties
+  // (billing bots, dashboards, CRMs) can react without polling. This is how an
+  // ecosystem grows on top of the panel without us building billing ourselves.
+  // Comma-separated URL list; empty = disabled.
+  WEBHOOK_URLS: z
+    .string()
+    .optional()
+    .transform((v) =>
+      v && v.trim()
+        ? v
+            .split(',')
+            .map((u) => u.trim())
+            .filter(Boolean)
+        : [],
+    ),
+  // HMAC-SHA256 secret signing each body (X-Iceslab-Signature header over
+  // `${timestamp}.${body}`) so receivers can verify authenticity + reject
+  // replays via the timestamp. Optional; unsigned if unset (dev only).
+  WEBHOOK_SECRET: z
+    .string()
+    .optional()
+    .transform((v) => (v === '' ? undefined : v)),
+
   // Slice S7 — public IP of the panel, baked into the node-install
   // command as `--panel-ip`. Causes the agent's UFW to allow :1337/tcp
   // ONLY from this IP. CRITICAL: must be the panel's *origin* IP, not
