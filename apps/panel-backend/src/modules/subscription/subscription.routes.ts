@@ -457,7 +457,7 @@ export async function subscriptionRoutes(app: FastifyInstance): Promise<void> {
         case 'clash':
           return reply
             .type('text/yaml; charset=utf-8')
-            .send(buildClashYaml(filtered));
+            .send(buildClashYaml(filtered, { routingPreset }));
         case 'singbox': {
           // Map shared bundle param to singbox values. 'flat' / 'balancer'
           // are xray-specific; in sing-box context they mean the default

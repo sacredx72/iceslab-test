@@ -1,3 +1,4 @@
+import type { RoutingPresetId } from '@iceslab/shared';
 import type { SubscriptionEndpoint } from '../subscription.formats.js';
 
 /**
@@ -28,7 +29,58 @@ function yamlString(value: string): string {
   return JSON.stringify(value); // double-quoted, JSON escapes are valid YAML
 }
 
-export function buildClashYaml(endpoints: SubscriptionEndpoint[]): string {
+/**
+ * Routing Templates (R1c) - `routingPreset: 'ru-split'` prepends split-routing
+ * rules ahead of the MATCH catch-all (ads -> REJECT, RU domains / RU IPs /
+ * private ranges -> DIRECT) and emits a geo-database block so mihomo can
+ * fetch geosite.dat / country.mmdb itself:
+ *
+ *   - `geox-url` points at the testingcf.jsdelivr.net mirror of
+ *     MetaCubeX/meta-rules-dat (the docs' own example) because the default
+ *     raw.githubusercontent.com source is blocked in RU - exactly where this
+ *     preset is used. `geo-auto-update` keeps the databases fresh.
+ *   - Private ranges are explicit IP-CIDR/IP-CIDR6 rules with `no-resolve`
+ *     (deterministic, no geo dependency) instead of a mmdb pseudo-country.
+ *   - `GEOIP,RU` stays last among the DIRECT rules and without `no-resolve`:
+ *     it is the fallback that may resolve a domain that missed every GEOSITE
+ *     rule before deciding tunnel-vs-direct.
+ *
+ * Default 'proxy-all' keeps the output byte-identical to pre-R1 builds.
+ */
+export interface ClashBuildOpts {
+  routingPreset?: RoutingPresetId;
+}
+
+const RU_SPLIT_GEO_LINES: readonly string[] = [
+  'geo-auto-update: true',
+  'geo-update-interval: 72',
+  'geox-url:',
+  '  geosite: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat"',
+  '  geoip: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat"',
+  '  mmdb: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country.mmdb"',
+  '',
+];
+
+const RU_SPLIT_RULE_LINES: readonly string[] = [
+  '  - GEOSITE,category-ads-all,REJECT',
+  '  - GEOSITE,category-ru,DIRECT',
+  '  - GEOSITE,category-gov-ru,DIRECT',
+  '  - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve',
+  '  - IP-CIDR,172.16.0.0/12,DIRECT,no-resolve',
+  '  - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve',
+  '  - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve',
+  '  - IP-CIDR,169.254.0.0/16,DIRECT,no-resolve',
+  '  - IP-CIDR6,fc00::/7,DIRECT,no-resolve',
+  '  - IP-CIDR6,fe80::/10,DIRECT,no-resolve',
+  '  - IP-CIDR6,::1/128,DIRECT,no-resolve',
+  '  - GEOIP,RU,DIRECT',
+];
+
+export function buildClashYaml(
+  endpoints: SubscriptionEndpoint[],
+  buildOpts: ClashBuildOpts = {},
+): string {
+  const ruSplit = (buildOpts.routingPreset ?? 'proxy-all') === 'ru-split';
   const proxies: string[] = [];
   const proxyNames: string[] = [];
 
@@ -154,6 +206,9 @@ export function buildClashYaml(endpoints: SubscriptionEndpoint[]): string {
   }
 
   const lines: string[] = [];
+  if (ruSplit) {
+    lines.push(...RU_SPLIT_GEO_LINES);
+  }
   lines.push('proxies:');
   if (proxies.length === 0) {
     lines.push('  []');
@@ -178,6 +233,9 @@ export function buildClashYaml(endpoints: SubscriptionEndpoint[]): string {
   lines.push('');
 
   lines.push('rules:');
+  if (ruSplit) {
+    lines.push(...RU_SPLIT_RULE_LINES);
+  }
   lines.push(proxyNames.length > 0 ? '  - MATCH,Auto' : '  - MATCH,DIRECT');
 
   return lines.join('\n') + '\n';

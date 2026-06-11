@@ -201,4 +201,53 @@ describe('buildClashYaml', () => {
     expect(out).toContain('network: tcp');
     expect(out).not.toContain('network: raw');
   });
+
+  // ───── Routing Templates (R1c) ─────
+
+  describe('routingPreset', () => {
+    it('default proxy-all output is byte-identical to pre-R1 (no geo block, no preset rules)', () => {
+      expect(buildClashYaml([xrayEp], { routingPreset: 'proxy-all' })).toBe(
+        buildClashYaml([xrayEp]),
+      );
+      const out = buildClashYaml([xrayEp]);
+      expect(out).not.toContain('GEOSITE');
+      expect(out).not.toContain('geox-url');
+      expect(out.startsWith('proxies:')).toBe(true);
+    });
+
+    it('ru-split emits geo block with jsdelivr mirrors and auto-update', () => {
+      const out = buildClashYaml([xrayEp], { routingPreset: 'ru-split' });
+      expect(out).toContain('geo-auto-update: true');
+      expect(out).toContain('geo-update-interval: 72');
+      expect(out).toContain(
+        'geosite: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat"',
+      );
+      expect(out).toContain(
+        'mmdb: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country.mmdb"',
+      );
+    });
+
+    it('ru-split rules: ads reject first, RU + private direct, MATCH,Auto last', () => {
+      const out = buildClashYaml([xrayEp], { routingPreset: 'ru-split' });
+      const rules = out
+        .slice(out.indexOf('rules:'))
+        .split('\n')
+        .filter((l) => l.startsWith('  - '))
+        .map((l) => l.trim());
+      expect(rules[0]).toBe('- GEOSITE,category-ads-all,REJECT');
+      expect(rules).toContain('- GEOSITE,category-ru,DIRECT');
+      expect(rules).toContain('- GEOSITE,category-gov-ru,DIRECT');
+      expect(rules).toContain('- IP-CIDR,10.0.0.0/8,DIRECT,no-resolve');
+      expect(rules).toContain('- IP-CIDR6,fc00::/7,DIRECT,no-resolve');
+      // GEOIP,RU resolves (no no-resolve) and sits right before the catch-all.
+      expect(rules[rules.length - 2]).toBe('- GEOIP,RU,DIRECT');
+      expect(rules[rules.length - 1]).toBe('- MATCH,Auto');
+    });
+
+    it('ru-split with no proxies keeps MATCH,DIRECT as the catch-all', () => {
+      const out = buildClashYaml([], { routingPreset: 'ru-split' });
+      expect(out).toContain('- GEOSITE,category-ads-all,REJECT');
+      expect(out.trimEnd().endsWith('- MATCH,DIRECT')).toBe(true);
+    });
+  });
 });
