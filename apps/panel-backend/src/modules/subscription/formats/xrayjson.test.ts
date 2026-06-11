@@ -159,6 +159,22 @@ describe('buildXrayJson', () => {
       expect(cfg.routing.domainStrategy).toBe('IPIfNonMatch');
     });
 
+    it('proxy-all emits no dns block; ru-split adds split DNS (R2)', () => {
+      const plain = parse(buildXrayJson([xrayEp]));
+      expect(plain.dns).toBeUndefined();
+
+      const cfg = parse(buildXrayJson([xrayEp], { routingPreset: 'ru-split' }));
+      expect(cfg.dns.servers).toHaveLength(2);
+      // RU resolver first: object form, scoped to RU geosites, no fallback.
+      expect(cfg.dns.servers[0]).toEqual({
+        address: '77.88.8.8',
+        domains: ['geosite:category-ru', 'geosite:category-gov-ru'],
+        skipFallback: true,
+      });
+      // General resolver second: plain IP (no DoH bootstrap problem).
+      expect(cfg.dns.servers[1]).toBe('8.8.8.8');
+    });
+
     it('ru-split composes with bundle=balancer (preset rules first, balancer catch-all last)', () => {
       const second: SubscriptionEndpoint = { ...xrayEp, nodeName: 'us-1' };
       const cfg = parse(

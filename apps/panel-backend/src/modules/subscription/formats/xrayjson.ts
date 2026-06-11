@@ -58,6 +58,26 @@ const RU_SPLIT_RULES: ReadonlyArray<Record<string, unknown>> = [
   { type: 'field', ip: ['geoip:private', 'geoip:ru'], outboundTag: 'direct' },
 ];
 
+/**
+ * Split DNS (R2). RU domains resolve via Yandex DNS (77.88.8.8) so RU CDNs
+ * return geo-correct answers; `skipFallback` keeps those queries off the
+ * general resolver. Everything else asks 8.8.8.8. Xray's built-in DNS obeys
+ * the routing table above, so the 77.88.8.8 query itself rides direct
+ * (matches geoip:ru) while 8.8.8.8 rides the tunnel - no plaintext foreign
+ * DNS on the RU wire. Plain-IP servers dodge the DoH bootstrap problem
+ * (resolving the resolver's own hostname).
+ */
+const RU_SPLIT_DNS: Record<string, unknown> = {
+  servers: [
+    {
+      address: '77.88.8.8',
+      domains: ['geosite:category-ru', 'geosite:category-gov-ru'],
+      skipFallback: true,
+    },
+    '8.8.8.8',
+  ],
+};
+
 export function buildXrayJson(
   endpoints: SubscriptionEndpoint[],
   opts: XrayJsonBuildOpts = {},
@@ -168,6 +188,7 @@ export function buildXrayJson(
 
   const config: Record<string, unknown> = {
     log: { loglevel: 'warning' },
+    ...(ruSplit ? { dns: RU_SPLIT_DNS } : {}),
     inbounds: [
       {
         tag: 'socks-in',

@@ -59,6 +59,13 @@ export interface SingboxBuildOpts {
  * 1.11), so the ru-split preset needs sing-box 1.11+. With the default
  * 'proxy-all' preset the output stays byte-identical to pre-R1 builds and
  * keeps working on 1.10.
+ *
+ * Split DNS (R2) is deliberately NOT emitted for sing-box: the DNS server
+ * format was reworked in 1.12 (typed servers replace address strings) and
+ * the DNS-rule address filters again in 1.14 - any single shape we pick
+ * breaks a real slice of installed clients. The route rules above already
+ * split by destination; resolution stays with the client app's own DNS
+ * config (clash/xrayjson formats do carry split DNS, see R2 in ROADMAP).
  */
 const RU_SPLIT_RULE_SETS: ReadonlyArray<Record<string, unknown>> = [
   {

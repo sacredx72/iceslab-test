@@ -249,5 +249,25 @@ describe('buildClashYaml', () => {
       expect(out).toContain('- GEOSITE,category-ads-all,REJECT');
       expect(out.trimEnd().endsWith('- MATCH,DIRECT')).toBe(true);
     });
+
+    it('ru-split emits split-DNS block (R2); proxy-all does not', () => {
+      expect(buildClashYaml([xrayEp])).not.toContain('dns:');
+
+      const out = buildClashYaml([xrayEp], { routingPreset: 'ru-split' });
+      expect(out).toContain('dns:');
+      expect(out).toContain('  enable: true');
+      expect(out).toContain('  enhanced-mode: fake-ip');
+      expect(out).toContain('  fake-ip-range: 198.18.0.1/16');
+      // RU domains pinned to Yandex DNS via nameserver-policy.
+      expect(out).toContain('    "geosite:category-ru": 77.88.8.8');
+      expect(out).toContain('    "geosite:category-gov-ru": 77.88.8.8');
+      // General resolvers are DoH; bootstrap nameservers are plain IPs.
+      expect(out).toContain('    - https://1.1.1.1/dns-query');
+      expect(out).toContain('  default-nameserver:');
+      expect(out).toContain('  proxy-server-nameserver:');
+      // DNS block sits before proxies, after the geo block.
+      expect(out.indexOf('dns:')).toBeGreaterThan(out.indexOf('geox-url:'));
+      expect(out.indexOf('dns:')).toBeLessThan(out.indexOf('proxies:'));
+    });
   });
 });

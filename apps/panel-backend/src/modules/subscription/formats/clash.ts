@@ -61,6 +61,38 @@ const RU_SPLIT_GEO_LINES: readonly string[] = [
   '',
 ];
 
+/**
+ * Split DNS (R2). fake-ip keeps app-side resolution instant; RU domains are
+ * answered by Yandex DNS (77.88.8.8) via nameserver-policy so RU CDNs return
+ * geo-correct IPs, everything else goes to DoH. `default-nameserver` and
+ * `proxy-server-nameserver` are plain IPs: they bootstrap the DoH hostnames
+ * and resolve the proxy node addresses without a chicken-and-egg loop.
+ * NOTE: mihomo sends DNS directly (not through the tunnel) by default; DoH
+ * keeps those queries encrypted on the wire.
+ */
+const RU_SPLIT_DNS_LINES: readonly string[] = [
+  'dns:',
+  '  enable: true',
+  '  enhanced-mode: fake-ip',
+  '  fake-ip-range: 198.18.0.1/16',
+  '  fake-ip-filter:',
+  '    - "*.lan"',
+  '    - "+.local"',
+  '  default-nameserver:',
+  '    - 77.88.8.8',
+  '    - 1.1.1.1',
+  '  proxy-server-nameserver:',
+  '    - 77.88.8.8',
+  '    - 1.1.1.1',
+  '  nameserver:',
+  '    - https://1.1.1.1/dns-query',
+  '    - https://dns.google/dns-query',
+  '  nameserver-policy:',
+  '    "geosite:category-ru": 77.88.8.8',
+  '    "geosite:category-gov-ru": 77.88.8.8',
+  '',
+];
+
 const RU_SPLIT_RULE_LINES: readonly string[] = [
   '  - GEOSITE,category-ads-all,REJECT',
   '  - GEOSITE,category-ru,DIRECT',
@@ -208,6 +240,7 @@ export function buildClashYaml(
   const lines: string[] = [];
   if (ruSplit) {
     lines.push(...RU_SPLIT_GEO_LINES);
+    lines.push(...RU_SPLIT_DNS_LINES);
   }
   lines.push('proxies:');
   if (proxies.length === 0) {
