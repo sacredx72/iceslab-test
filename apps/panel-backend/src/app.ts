@@ -175,7 +175,13 @@ export async function buildApp(): Promise<FastifyInstance> {
     // B9 - back the rate-limit counter with Redis so the window survives a
     // restart (in-memory reset every deploy, letting a flooder start fresh)
     // and stays consistent if the backend ever runs more than one instance.
-    redis,
+    //
+    // NOT in tests: each test file builds its own app, and the default
+    // in-memory store resets per instance. A shared Redis store instead
+    // accumulates auth requests across the WHOLE suite and trips the 100/min
+    // global limit (429 RATE_LIMITED in registerAdmin). Keep tests on the
+    // per-instance in-memory store.
+    ...(config.NODE_ENV === 'test' ? {} : { redis }),
   });
 
   await app.register(fastifyCookie);
