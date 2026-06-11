@@ -64,6 +64,13 @@ type Adapter struct {
 	// "first sight" (fresh agent start or just-added peer) and reports zero, so
 	// an agent restart over a still-up interface never re-bills the lifetime.
 	lastStats map[string]peerCounters
+
+	// N3 - cached `awg show` health probe (guarded by mu). Healthy() serves
+	// healthResult and refreshes in the background once older than
+	// healthProbeTTL, so the hot health path never forks the CLI inline.
+	healthCheckedAt time.Time
+	healthResult    bool
+	healthProbing   bool
 }
 
 type peerCounters struct {
@@ -321,25 +328,63 @@ func parseAwgDump(dump string) (rx, tx map[string]int64) {
 	return
 }
 
+// healthProbeTTL caps how often Healthy() shells out to `awg show`.
+const healthProbeTTL = 20 * time.Second
+
 // Healthy reports whether the adapter has finished Start successfully and
 // (when managed) the awg interface still exists.
+//
+// N3 - the probe (`awg show`) can hang on a known kernel-module bug, which
+// would block the agent's healthcheck goroutine. So we cache the last probe
+// result and refresh it in the BACKGROUND once stale: the request path returns
+// the cached value instantly and never forks inline. The very first call
+// probes synchronously so we don't report a bogus default before any data.
 func (a *Adapter) Healthy() bool {
 	a.mu.Lock()
 	started := a.started
 	managed := a.cfg.AwgQuickBin != ""
 	iface := a.cfg.Inbound.Interface
-	a.mu.Unlock()
-
 	if !started {
+		a.mu.Unlock()
 		return false
 	}
 	if !managed {
+		a.mu.Unlock()
 		return true
 	}
+
+	if a.healthCheckedAt.IsZero() {
+		// First probe: synchronous, so the result is real before we return.
+		a.mu.Unlock()
+		return a.probeHealth(iface)
+	}
+	if time.Since(a.healthCheckedAt) >= healthProbeTTL && !a.healthProbing {
+		// Stale: kick a single background refresh, return the last-known value.
+		a.healthProbing = true
+		go func() {
+			a.probeHealth(iface)
+			a.mu.Lock()
+			a.healthProbing = false
+			a.mu.Unlock()
+		}()
+	}
+	res := a.healthResult
+	a.mu.Unlock()
+	return res
+}
+
+// probeHealth runs `awg show <iface>` and stores the result + timestamp. Bounded
+// by a 2s context so a hung CLI can't wedge the caller indefinitely.
+func (a *Adapter) probeHealth(iface string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	_, err := a.cfg.runCmd(ctx, a.cfg.AwgBin, "show", iface)
-	return err == nil
+	ok := err == nil
+	a.mu.Lock()
+	a.healthResult = ok
+	a.healthCheckedAt = time.Now()
+	a.mu.Unlock()
+	return ok
 }
 
 // ApplyInbound parses panel-pushed AmneziaWG config, classifies the diff vs

@@ -215,6 +215,14 @@ func (a *Adapter) GetStats() (*core.Stats, error) {
 	client := a.cfg.metricsClient
 	a.mu.Unlock()
 
+	// N10 - parity with the SS/xray guard: no tracked users means nothing to
+	// attribute, so skip the HTTP scrape of the mtg metrics endpoint. On a node
+	// where mtproto is registered defensively but unused, this stops a pointless
+	// GET (and its warn-spam when the endpoint is down) every cron tick.
+	if len(users) == 0 {
+		return &core.Stats{Users: users}, nil
+	}
+
 	in, out, err := scrapeMtgMetrics(client, url)
 	if err != nil {
 		// Stats poll must not fail just because metrics endpoint is

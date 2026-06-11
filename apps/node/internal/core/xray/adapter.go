@@ -181,6 +181,13 @@ func (a *Adapter) GetStats() (*core.Stats, error) {
 		return &core.Stats{Users: users}, nil
 	}
 
+	// N2 - no tracked users means nothing to count; skip forking the xray
+	// binary entirely. A freshly-provisioned or drained node otherwise paid a
+	// full `xray api statsquery` exec every 30s forever for an empty result.
+	if len(users) == 0 {
+		return &core.Stats{Users: users}, nil
+	}
+
 	counters, err := queryUserStats(context.Background(), run, binary, apiPort)
 	if err != nil {
 		// Soft-fail — log and return zero counters. Hard error would block

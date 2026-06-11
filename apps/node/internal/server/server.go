@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/icecompany-tech/iceslab/apps/node/internal/atomicfile"
@@ -215,17 +216,29 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "GET only")
 		return
 	}
-	cores := make([]dto.CoreStatus, 0, len(s.cfg.Adapters))
+	// N8 - probe cores concurrently. Each Healthy() may fork a CLI (awg show);
+	// serial probing stacked the per-core timeouts into one slow healthcheck.
+	// Fixed-index slots avoid a shared-write race and preserve adapter order.
+	cores := make([]dto.CoreStatus, len(s.cfg.Adapters))
+	var wg sync.WaitGroup
+	for i, adapter := range s.cfg.Adapters {
+		wg.Add(1)
+		go func(i int, adapter core.CoreAdapter) {
+			defer wg.Done()
+			cores[i] = dto.CoreStatus{
+				Name:    dto.ProtocolName(adapter.Name()),
+				Running: adapter.Healthy(),
+			}
+		}(i, adapter)
+	}
+	wg.Wait()
+
 	allHealthy := true
-	for _, adapter := range s.cfg.Adapters {
-		running := adapter.Healthy()
-		if !running {
+	for _, c := range cores {
+		if !c.Running {
 			allHealthy = false
+			break
 		}
-		cores = append(cores, dto.CoreStatus{
-			Name:    dto.ProtocolName(adapter.Name()),
-			Running: running,
-		})
 	}
 	status := "ok"
 	if !allHealthy {
@@ -471,23 +484,44 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "GET only")
 		return
 	}
+	// N8 - poll adapters concurrently. Each GetStats forks a CLI/binary (xray
+	// statsquery, awg show dump); serial polling stacked the per-adapter
+	// timeouts into one long request. Per-index slots avoid a shared-write race.
+	type statResult struct {
+		users []dto.UserStats
+		in    int64
+		out   int64
+	}
+	results := make([]statResult, len(s.cfg.Adapters))
+	var wg sync.WaitGroup
+	for i, adapter := range s.cfg.Adapters {
+		wg.Add(1)
+		go func(i int, adapter core.CoreAdapter) {
+			defer wg.Done()
+			stats, err := adapter.GetStats()
+			if err != nil {
+				s.logger.Error("adapter getStats failed", "core", adapter.Name(), "err", err)
+				return
+			}
+			res := statResult{in: stats.TotalBytesIn, out: stats.TotalBytesOut}
+			for _, u := range stats.Users {
+				res.users = append(res.users, dto.UserStats{
+					UserID:   u.UserID,
+					BytesIn:  u.BytesIn,
+					BytesOut: u.BytesOut,
+				})
+			}
+			results[i] = res
+		}(i, adapter)
+	}
+	wg.Wait()
+
 	allUsers := []dto.UserStats{}
 	var totalIn, totalOut int64
-	for _, adapter := range s.cfg.Adapters {
-		stats, err := adapter.GetStats()
-		if err != nil {
-			s.logger.Error("adapter getStats failed", "core", adapter.Name(), "err", err)
-			continue
-		}
-		for _, u := range stats.Users {
-			allUsers = append(allUsers, dto.UserStats{
-				UserID:   u.UserID,
-				BytesIn:  u.BytesIn,
-				BytesOut: u.BytesOut,
-			})
-		}
-		totalIn += stats.TotalBytesIn
-		totalOut += stats.TotalBytesOut
+	for _, res := range results {
+		allUsers = append(allUsers, res.users...)
+		totalIn += res.in
+		totalOut += res.out
 	}
 	uptime := int64(time.Since(s.startedAt).Seconds())
 	writeJSON(w, http.StatusOK, dto.GetStatsResponse{

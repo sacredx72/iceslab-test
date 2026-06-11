@@ -19,7 +19,18 @@ import (
 	"fmt"
 	"log/slog"
 	"os/exec"
+	"sync"
 	"time"
+)
+
+// N11 - cache of (port/proto) specs already ensured this process lifetime.
+// Every applyInbound re-calls Allow for the same ports, and `ufw allow` is a
+// fork even when the rule already exists; this skips the redundant fork. The
+// cache is per-process: an agent restart re-runs ufw once per spec (idempotent),
+// which also re-covers any external `ufw reset` between restarts.
+var (
+	allowedMu    sync.Mutex
+	allowedSpecs = make(map[string]struct{})
 )
 
 // Allow opens an inbound UFW rule for the given (port, proto).
@@ -35,16 +46,24 @@ func Allow(ctx context.Context, logger *slog.Logger, port int, proto string) {
 		logger.Warn("firewall.Allow: invalid proto, skipping", "proto", proto)
 		return
 	}
+	spec := fmt.Sprintf("%d/%s", port, proto)
+
+	allowedMu.Lock()
+	_, cached := allowedSpecs[spec]
+	allowedMu.Unlock()
+	if cached {
+		return // N11 - already ensured; skip the redundant ufw fork.
+	}
+
 	if _, err := exec.LookPath("ufw"); err != nil {
 		// ufw not installed (e.g. dev container, alpine, custom image).
 		// Operators on those hosts manage firewall externally; we don't
 		// fail. Logged at debug so it doesn't spam normal deployments.
-		logger.Debug("firewall.Allow: ufw not installed, skipping", "spec", fmt.Sprintf("%d/%s", port, proto))
+		logger.Debug("firewall.Allow: ufw not installed, skipping", "spec", spec)
 		return
 	}
 	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	spec := fmt.Sprintf("%d/%s", port, proto)
 	out, err := exec.CommandContext(cctx, "ufw", "allow", spec).CombinedOutput()
 	if err != nil {
 		// Non-fatal — agent stays alive, admin can fix UFW manually.
@@ -52,5 +71,8 @@ func Allow(ctx context.Context, logger *slog.Logger, port int, proto string) {
 			"spec", spec, "err", err, "out", string(out))
 		return
 	}
+	allowedMu.Lock()
+	allowedSpecs[spec] = struct{}{}
+	allowedMu.Unlock()
 	logger.Info("firewall.Allow: rule ensured", "spec", spec)
 }
