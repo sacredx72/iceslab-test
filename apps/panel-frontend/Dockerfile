@@ -9,7 +9,10 @@
 # nginx config also reverse-proxies `/api`, `/sub`, and `/health` to the
 # backend service (compose service name `backend` on port 3000).
 
-ARG NODE_VERSION=22-alpine
+# node pinned to a minor (not floating `22-alpine`) - see backend Dockerfile
+# for the 2026-06-11 drift incident. nginx is already minor-pinned. Digest pins
+# (@sha256) are the follow-up (I4b) once Renovate is wired.
+ARG NODE_VERSION=22.22-alpine
 ARG NGINX_VERSION=1.27-alpine
 
 # ───── Build stage ─────

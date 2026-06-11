@@ -512,12 +512,15 @@ step "Pre-pull base images"
 # Pulling these in parallel BEFORE build means the docker build stages don't
 # compete for bandwidth and there's less variance in build time. Also gives
 # the operator visible progress instead of a silent first-run delay.
-log "Caching postgres:16-alpine, redis:7-alpine, nginx:1.27-alpine, node:22-alpine, golang:1.23-alpine"
+# Tags MUST match the Dockerfile ARGs / compose images, else the pre-pull
+# caches an image the build never uses (was: node:22-alpine vs Dockerfile
+# 22.22-alpine, and golang:1.23 vs Dockerfile 1.22 - a dead pull). I4.
+log "Caching postgres:16-alpine, redis:7-alpine, nginx:1.27-alpine, node:22.22-alpine, golang:1.22-alpine"
 docker pull postgres:16-alpine >/dev/null 2>&1 &
 docker pull redis:7-alpine >/dev/null 2>&1 &
 docker pull nginx:1.27-alpine >/dev/null 2>&1 &
-docker pull node:22-alpine >/dev/null 2>&1 &
-docker pull golang:1.23-alpine >/dev/null 2>&1 &
+docker pull node:22.22-alpine >/dev/null 2>&1 &
+docker pull golang:1.22-alpine >/dev/null 2>&1 &
 wait
 ok "base images cached locally"
 

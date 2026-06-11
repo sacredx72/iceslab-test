@@ -9,6 +9,10 @@
 # Runtime is `distroless/static:nonroot` — no shell, no package manager,
 # minimal attack surface. The Go binary is fully static (CGO_ENABLED=0).
 
+# golang is minor-pinned (1.22.x). distroless `nonroot` is a floating tag with
+# no version aliases - it should be digest-pinned (@sha256) as the I4b
+# follow-up once Renovate is wired; distroless rarely ships behaviour-breaking
+# changes, so the floating tag is acceptable in the interim.
 ARG GO_VERSION=1.22-alpine
 ARG DISTROLESS_VERSION=nonroot
 

@@ -5,7 +5,13 @@
 #
 #   docker build -f apps/panel-backend/Dockerfile -t iceslab-backend .
 
-ARG NODE_VERSION=22-alpine
+# Pinned to a minor (not the floating `22-alpine` major tag). On 2026-06-11 the
+# major tag drifted from an earlier 22.x to 22.22, whose stricter type-stripped
+# .ts resolution crash-looped the backend on rebuild (ERR_MODULE_NOT_FOUND on
+# the shared package). Minor-pinning still pulls 22.22.x security patches but
+# never silently jumps a minor again. Digest-pinning (@sha256) is the
+# production-grade follow-up (I4b) once we wire Renovate.
+ARG NODE_VERSION=22.22-alpine
 
 # ───── Build stage ─────
 FROM node:${NODE_VERSION} AS builder
