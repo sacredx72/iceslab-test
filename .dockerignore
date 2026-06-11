@@ -19,9 +19,12 @@ apps/node/iceslab-node.exe
 # Local env / secrets / logs
 .env
 .env.local
+.env.*
 **/.env
 **/.env.local
+**/.env.*
 *.log
+*.bak
 
 # Editor / OS noise
 .git
