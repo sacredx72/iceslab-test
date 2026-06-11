@@ -411,10 +411,12 @@ func (a *Adapter) regenerateAndRestart(ctx context.Context) error {
 	}
 
 	proc := subprocess.New(subprocess.Config{
-		Name:   Name,
-		Binary: binPath,
-		Args:   []string{"run", "-c", cfgPath},
-		Logger: a.logger,
+		Name:           Name,
+		Binary:         binPath,
+		Args:           []string{"run", "-c", cfgPath},
+		Logger:         a.logger,
+		MaxRestarts:    subprocess.DefaultMaxRestarts,
+		RestartBackoff: subprocess.DefaultRestartBackoff,
 	})
 	if err := proc.Start(ctx); err != nil {
 		a.mu.Lock()

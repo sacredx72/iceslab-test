@@ -239,10 +239,12 @@ func (a *Adapter) Start(ctx context.Context) error {
 	}
 
 	proc := subprocess.New(subprocess.Config{
-		Name:   Name,
-		Binary: a.cfg.BinaryPath,
-		Args:   []string{"server", "-c", a.cfg.ConfigPath},
-		Logger: a.logger,
+		Name:           Name,
+		Binary:         a.cfg.BinaryPath,
+		Args:           []string{"server", "-c", a.cfg.ConfigPath},
+		Logger:         a.logger,
+		MaxRestarts:    subprocess.DefaultMaxRestarts,
+		RestartBackoff: subprocess.DefaultRestartBackoff,
 	})
 	if err := proc.Start(ctx); err != nil {
 		// Best-effort: tear down the auth callback we just started.

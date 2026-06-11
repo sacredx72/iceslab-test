@@ -21,6 +21,22 @@ import (
 // before escalating to SIGKILL.
 const StopGracePeriod = 5 * time.Second
 
+// DefaultMaxRestarts / DefaultRestartBackoff (N9): the crash-restart policy the
+// proxy-core adapters pass to subprocess.Config. Tuned to ride out transient
+// crashes (OOM blip, a flaky upstream reload) without masking a hard
+// crash-loop: 5 attempts inside restartResetWindow, then give up and let the
+// panel healthcheck report the core down.
+const (
+	DefaultMaxRestarts    = 5
+	DefaultRestartBackoff = 2 * time.Second
+)
+
+// restartResetWindow (N9): a process that stays up at least this long is judged
+// "stable", so its crash-restart counter resets. A single crash after a long
+// healthy run isn't penalised by crashes from hours ago; a tight crash-loop
+// still exhausts MaxRestarts within the window.
+const restartResetWindow = 60 * time.Second
+
 type Config struct {
 	// Name appears in log lines (`source=<name>`) and error messages.
 	Name string
@@ -30,6 +46,13 @@ type Config struct {
 	Args []string
 	// Logger receives one entry per line of stdout/stderr (Info/Error level).
 	Logger *slog.Logger
+	// N9 - restart-on-crash policy. MaxRestarts == 0 (the default) disables
+	// auto-restart: a crash leaves the process down until something calls Start
+	// again (legacy behaviour). When > 0, the crash watcher respawns the process
+	// after an UNEXPECTED exit (not a Stop), up to MaxRestarts times within
+	// restartResetWindow, waiting RestartBackoff between attempts.
+	MaxRestarts    int
+	RestartBackoff time.Duration
 }
 
 // Subprocess is a single managed os/exec process. Methods are goroutine-safe.
@@ -46,10 +69,15 @@ type Config struct {
 type Subprocess struct {
 	cfg Config
 
-	mu       sync.Mutex
-	cmd      *exec.Cmd
-	exited   chan struct{} // closed by the watcher goroutine on Wait() return
-	exitErr  error         // set by watcher before closing `exited`; read under mu
+	mu      sync.Mutex
+	cmd     *exec.Cmd
+	exited  chan struct{} // closed by the watcher goroutine on Wait() return
+	exitErr error         // set by watcher before closing `exited`; read under mu
+	// N9 - restart-on-crash bookkeeping (all under mu).
+	ctx          context.Context // Start ctx, reused so a respawn stays ctx-bound
+	stopping     bool            // set by Stop so the watcher won't respawn
+	restartCount int             // crashes within the current reset window
+	lastSpawnAt  time.Time       // when the live process was spawned
 }
 
 // New builds a Subprocess; nothing is spawned until Start is called.
@@ -69,7 +97,18 @@ func (s *Subprocess) Start(ctx context.Context) error {
 	if s.cmd != nil {
 		return fmt.Errorf("%s: already started", s.cfg.Name)
 	}
+	// Fresh Start (after New or a Stop): clear the crash-restart state so a new
+	// lifecycle gets a full restart budget and isn't blocked by an old Stop.
+	s.stopping = false
+	s.restartCount = 0
+	return s.spawnLocked(ctx)
+}
 
+// spawnLocked execs the binary and launches its crash watcher. Caller MUST hold
+// s.mu and have ensured s.cmd == nil. ctx is retained on the struct so a
+// crash-restart respawn stays bound to the same lifetime (ctx-cancel still
+// kills it).
+func (s *Subprocess) spawnLocked(ctx context.Context) error {
 	cmd := exec.CommandContext(ctx, s.cfg.Binary, s.cfg.Args...)
 	cmd.Stdout = newLogWriter(s.cfg.Logger, slog.LevelInfo, s.cfg.Name)
 	cmd.Stderr = newLogWriter(s.cfg.Logger, slog.LevelError, s.cfg.Name)
@@ -88,41 +127,91 @@ func (s *Subprocess) Start(ctx context.Context) error {
 		return fmt.Errorf("spawn %s: %w", s.cfg.Name, err)
 	}
 	s.cmd = cmd
+	s.ctx = ctx
+	s.lastSpawnAt = time.Now()
 	exited := make(chan struct{})
 	s.exited = exited
 	s.exitErr = nil
 	s.cfg.Logger.Info(s.cfg.Name+" subprocess started", "pid", cmd.Process.Pid)
-
-	// Crash watcher. Without this, a subprocess that segfaults leaves
-	// s.cmd non-nil and Running() previously returned true (it read
-	// ProcessState which was nil since nothing called Wait). Healthy()
-	// would lie. With the watcher: Wait() returns on any exit
-	// (clean or crash), we record the error, close `exited`. Running()
-	// observes the closed channel and returns false.
-	//
-	// IMPORTANT: on crash we ALSO clear s.cmd so the adapter can call
-	// Start() again for restart-on-crash. Without this nil-out, a second
-	// Start() returns "already started" forever even though the process
-	// is dead.
-	go func() {
-		err := cmd.Wait()
-		s.mu.Lock()
-		s.exitErr = err
-		// Only clear s.cmd if it still points at this very process — Stop()
-		// may have already cleared+restarted. Compare-and-swap by pointer.
-		if s.cmd == cmd {
-			s.cmd = nil
-			s.exited = nil
-		}
-		s.mu.Unlock()
-		close(exited)
-		if err != nil {
-			s.cfg.Logger.Warn(s.cfg.Name+" subprocess exited", "err", err)
-		} else {
-			s.cfg.Logger.Info(s.cfg.Name + " subprocess exited cleanly")
-		}
-	}()
+	go s.watch(cmd, exited, ctx)
 	return nil
+}
+
+// watch blocks on cmd.Wait() and, on exit, records the result, marks the
+// process not-running, and (N9) optionally respawns it.
+//
+// Without the watcher a segfaulted subprocess would leave s.cmd non-nil and
+// Running() lying. With it: Wait() returns on any exit, we record the error,
+// nil out s.cmd (so a future Start works) and close `exited` (so Running()/Stop
+// observe it). When a restart policy is configured AND the exit was unexpected
+// (not a Stop, still the current cmd, budget left) we back off and respawn.
+func (s *Subprocess) watch(cmd *exec.Cmd, exited chan struct{}, ctx context.Context) {
+	err := cmd.Wait()
+
+	s.mu.Lock()
+	s.exitErr = err
+	// Only act if this watcher's cmd is still the active one — Stop() or an
+	// earlier restart may have already swapped it out. Compare by pointer.
+	isCurrent := s.cmd == cmd
+	if isCurrent {
+		s.cmd = nil
+		s.exited = nil
+	}
+	restart := false
+	exhausted := false
+	var backoff time.Duration
+	var attempt, maxR int
+	if isCurrent && !s.stopping && s.cfg.MaxRestarts > 0 {
+		if time.Since(s.lastSpawnAt) > restartResetWindow {
+			s.restartCount = 0 // stable run — fresh budget
+		}
+		if s.restartCount < s.cfg.MaxRestarts {
+			s.restartCount++
+			restart = true
+			backoff = s.cfg.RestartBackoff
+			attempt = s.restartCount
+			maxR = s.cfg.MaxRestarts
+		} else {
+			exhausted = true
+			maxR = s.cfg.MaxRestarts
+		}
+	}
+	s.mu.Unlock()
+
+	close(exited)
+	if err != nil {
+		s.cfg.Logger.Warn(s.cfg.Name+" subprocess exited", "err", err)
+	} else {
+		s.cfg.Logger.Info(s.cfg.Name + " subprocess exited cleanly")
+	}
+	if exhausted {
+		s.cfg.Logger.Error(s.cfg.Name+" exceeded crash-restart budget, leaving down",
+			"max", maxR, "window", restartResetWindow)
+		return
+	}
+	if !restart {
+		return
+	}
+
+	// Back off before respawning, but bail immediately if the lifetime ctx is
+	// cancelled (agent shutting down).
+	if backoff > 0 {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// A Stop (or another Start) during the backoff window wins — don't respawn.
+	if s.stopping || s.cmd != nil {
+		return
+	}
+	s.cfg.Logger.Warn(s.cfg.Name+" restarting after crash", "attempt", attempt, "max", maxR)
+	if err := s.spawnLocked(ctx); err != nil {
+		s.cfg.Logger.Error(s.cfg.Name+" crash-restart failed", "err", err)
+	}
 }
 
 // Stop gracefully terminates the process: SIGTERM, wait up to StopGracePeriod
@@ -133,6 +222,11 @@ func (s *Subprocess) Start(ctx context.Context) error {
 // closed, we just clear state and return.
 func (s *Subprocess) Stop(_ context.Context) error {
 	s.mu.Lock()
+	// N9 - tell the crash watcher this exit is intentional so it doesn't
+	// respawn. Set BEFORE clearing cmd and unconditionally (even on the
+	// already-crashed fast path) so a Stop during a restart-backoff window
+	// still cancels the pending respawn.
+	s.stopping = true
 	cmd := s.cmd
 	exited := s.exited
 	s.cmd = nil

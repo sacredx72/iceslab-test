@@ -291,10 +291,12 @@ func (a *Adapter) regenerateAndReload(parent context.Context) error {
 	if !procExists {
 		// Cold start: spawn caddy.
 		proc := subprocess.New(subprocess.Config{
-			Name:   Name,
-			Binary: bin,
-			Args:   []string{"run", "--config", cfgPath, "--adapter", "caddyfile"},
-			Logger: a.logger,
+			Name:           Name,
+			Binary:         bin,
+			Args:           []string{"run", "--config", cfgPath, "--adapter", "caddyfile"},
+			Logger:         a.logger,
+			MaxRestarts:    subprocess.DefaultMaxRestarts,
+			RestartBackoff: subprocess.DefaultRestartBackoff,
 		})
 		if err := proc.Start(parent); err != nil {
 			return fmt.Errorf("start caddy: %w", err)

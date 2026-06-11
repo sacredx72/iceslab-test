@@ -136,6 +136,87 @@ func TestHealthyFlipsAfterCrash(t *testing.T) {
 	}
 }
 
+// TestN9RestartsOnCrashThenGivesUp verifies the bounded restart-on-crash
+// supervisor: /bin/false exits instantly, so the watcher respawns it up to
+// MaxRestarts times (with backoff) and then leaves it down.
+func TestN9RestartsOnCrashThenGivesUp(t *testing.T) {
+	proc := New(Config{
+		Name:           "crash-loop",
+		Binary:         "/bin/false", // rc=1 immediately
+		Logger:         newSilentLogger(),
+		MaxRestarts:    3,
+		RestartBackoff: 10 * time.Millisecond,
+	})
+	if err := proc.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		proc.mu.Lock()
+		done := proc.restartCount >= 3 && proc.cmd == nil
+		proc.mu.Unlock()
+		if done {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	proc.mu.Lock()
+	rc := proc.restartCount
+	cmd := proc.cmd
+	proc.mu.Unlock()
+	if rc != 3 {
+		t.Errorf("restartCount: got %d, want 3 (the budget)", rc)
+	}
+	if cmd != nil {
+		t.Errorf("expected process down after exhausting the restart budget")
+	}
+	if proc.Running() {
+		t.Errorf("Running: expected false after restart budget exhausted")
+	}
+}
+
+// TestN9StopCancelsPendingRestart verifies a Stop during the restart backoff
+// window cancels the pending respawn (the restart count must not climb).
+func TestN9StopCancelsPendingRestart(t *testing.T) {
+	proc := New(Config{
+		Name:           "crash-stop",
+		Binary:         "/bin/false",
+		Logger:         newSilentLogger(),
+		MaxRestarts:    5,
+		RestartBackoff: 300 * time.Millisecond,
+	})
+	if err := proc.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// First crash registers ~immediately; the watcher schedules a respawn and
+	// enters the 300ms backoff. Stop before it fires.
+	time.Sleep(50 * time.Millisecond)
+	_ = proc.Stop(context.Background())
+
+	proc.mu.Lock()
+	countAfterStop := proc.restartCount
+	proc.mu.Unlock()
+
+	time.Sleep(500 * time.Millisecond) // longer than the backoff
+
+	proc.mu.Lock()
+	finalCount := proc.restartCount
+	cmd := proc.cmd
+	proc.mu.Unlock()
+	if finalCount != countAfterStop {
+		t.Errorf("restartCount grew after Stop: %d -> %d (respawn not cancelled)", countAfterStop, finalCount)
+	}
+	if cmd != nil {
+		t.Errorf("expected no live process after Stop")
+	}
+	if proc.Running() {
+		t.Errorf("Running: expected false after Stop")
+	}
+}
+
 func TestStopRespectsContext(t *testing.T) {
 	proc := New(Config{
 		Name:   "sleep-long",
