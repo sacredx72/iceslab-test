@@ -2,6 +2,7 @@ package mieru
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -44,6 +45,9 @@ type Adapter struct {
 	mu      sync.Mutex
 	users   map[string]User // userId → User
 	started bool
+	// N6 - sha256 of the last successfully-applied rendered config. A sync that
+	// produces an identical blob skips the two `mita apply/reload` CLI forks.
+	renderedHash [32]byte
 
 	// restartMu serializes regenerateAndReload; never held with mu across IO.
 	restartMu sync.Mutex
@@ -222,6 +226,18 @@ func (a *Adapter) regenerateAndReload(ctx context.Context) error {
 		return nil
 	}
 
+	// N6 - skip the two CLI forks when the rendered config is byte-identical to
+	// the last one we applied. add/remove of an unrelated protocol's users, or a
+	// no-op resync, otherwise paid `mita apply` + `mita reload` for nothing.
+	hash := sha256.Sum256(blob)
+	a.mu.Lock()
+	unchanged := a.started && a.renderedHash == hash
+	a.mu.Unlock()
+	if unchanged {
+		a.logger.Debug("mieru config unchanged, skipping mita apply/reload", "users", len(users))
+		return nil
+	}
+
 	// `mita apply config <path>` parses + applies the new config without
 	// dropping existing sessions. Then `mita reload` (or just SIGHUP via
 	// `mita`) finalises.
@@ -237,6 +253,7 @@ func (a *Adapter) regenerateAndReload(ctx context.Context) error {
 
 	a.mu.Lock()
 	a.started = true
+	a.renderedHash = hash
 	a.mu.Unlock()
 	a.logger.Info("mieru (mita) reloaded", "users", len(users), "mtu", inbound.MTU)
 	return nil

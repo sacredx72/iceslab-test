@@ -18,6 +18,11 @@ const Name = "naive"
 
 const defaultReloadTimeout = 15 * time.Second
 
+// caddyLivenessGrace is how long N7 waits after spawning caddy before checking
+// it's still running — long enough to catch an immediate config/port/ACME exit,
+// short enough not to stall the applyInbound RPC.
+const caddyLivenessGrace = 1500 * time.Millisecond
+
 // Config is the per-instance settings for a NaiveProxyAdapter.
 type Config struct {
 	// Inbound is the static Caddyfile settings (hostname, ports, fronting).
@@ -293,6 +298,19 @@ func (a *Adapter) regenerateAndReload(parent context.Context) error {
 		})
 		if err := proc.Start(parent); err != nil {
 			return fmt.Errorf("start caddy: %w", err)
+		}
+		// N7 - Start() only confirms the fork succeeded. caddy can still exit
+		// within the first moment on a bad Caddyfile, a port conflict, or an
+		// ACME failure. Without this gate we'd flip started=true and the panel
+		// would mark the node healthy while nothing is listening. Give it a
+		// brief grace, then confirm it's still alive.
+		select {
+		case <-parent.Done():
+		case <-time.After(caddyLivenessGrace):
+		}
+		if !proc.Running() {
+			_ = proc.Stop(parent)
+			return fmt.Errorf("caddy exited within %s of start (check Caddyfile / port / ACME)", caddyLivenessGrace)
 		}
 		a.mu.Lock()
 		a.proc = proc
