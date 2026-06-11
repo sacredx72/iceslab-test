@@ -23,6 +23,84 @@ func newTestAdapter(t *testing.T) (*Adapter, string) {
 	return a, configPath
 }
 
+// TestN1_BuildAduInbound_VLESS verifies the `xray api adu` input JSON matches
+// what xray expects for VLESS: tag + protocol + settings.clients[{id,email,flow}]
+// + decryption. A wrong shape would make every live add silently fall back to a
+// restart, so this is the high-value guard for N1.
+func TestN1_BuildAduInbound_VLESS(t *testing.T) {
+	data, err := buildAduInbound(
+		InboundConfig{Subprotocol: "vless"},
+		xrayClient{ID: "uuid-a", Email: "alice", Flow: "xtls-rprx-vision"},
+	)
+	if err != nil {
+		t.Fatalf("buildAduInbound: %v", err)
+	}
+	var doc struct {
+		Tag      string `json:"tag"`
+		Protocol string `json:"protocol"`
+		Settings struct {
+			Clients []struct {
+				ID    string `json:"id"`
+				Email string `json:"email"`
+				Flow  string `json:"flow"`
+			} `json:"clients"`
+			Decryption string `json:"decryption"`
+		} `json:"settings"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, data)
+	}
+	if doc.Tag != "vless-in" {
+		t.Errorf("tag: got %q want vless-in", doc.Tag)
+	}
+	if doc.Protocol != "vless" {
+		t.Errorf("protocol: got %q want vless", doc.Protocol)
+	}
+	if len(doc.Settings.Clients) != 1 {
+		t.Fatalf("clients: got %d want 1", len(doc.Settings.Clients))
+	}
+	c := doc.Settings.Clients[0]
+	if c.ID != "uuid-a" || c.Email != "alice" || c.Flow != "xtls-rprx-vision" {
+		t.Errorf("client: got %+v", c)
+	}
+	if doc.Settings.Decryption != "none" {
+		t.Errorf("vless decryption: got %q want none", doc.Settings.Decryption)
+	}
+}
+
+// TestN1_BuildAduInbound_Trojan verifies the Trojan shape: clients use
+// `password` (not `id`) and respect a custom tag.
+func TestN1_BuildAduInbound_Trojan(t *testing.T) {
+	data, err := buildAduInbound(
+		InboundConfig{Subprotocol: "trojan", Tag: "trojan-in"},
+		xrayClient{ID: "secret-pass", Email: "bob"},
+	)
+	if err != nil {
+		t.Fatalf("buildAduInbound: %v", err)
+	}
+	var doc struct {
+		Tag      string `json:"tag"`
+		Protocol string `json:"protocol"`
+		Settings struct {
+			Clients []struct {
+				Password string `json:"password"`
+				Email    string `json:"email"`
+			} `json:"clients"`
+		} `json:"settings"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, data)
+	}
+	if doc.Protocol != "trojan" || doc.Tag != "trojan-in" {
+		t.Errorf("tag/proto: got %q / %q", doc.Tag, doc.Protocol)
+	}
+	if len(doc.Settings.Clients) != 1 ||
+		doc.Settings.Clients[0].Password != "secret-pass" ||
+		doc.Settings.Clients[0].Email != "bob" {
+		t.Errorf("trojan client: got %+v", doc.Settings.Clients)
+	}
+}
+
 func TestNameMatchesProtocol(t *testing.T) {
 	a, _ := newTestAdapter(t)
 	if a.Name() != Name {

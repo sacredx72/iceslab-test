@@ -5,15 +5,22 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
 	"sort"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/icecompany-tech/iceslab/apps/node/internal/core"
 	"github.com/icecompany-tech/iceslab/apps/node/internal/core/subprocess"
 )
 
 const Name = "xray"
+
+// apiCallTimeout caps the live HandlerService calls (`xray api adu`/`rmu`). The
+// API is loopback IPC, so this is generous headroom, not a tight budget.
+const apiCallTimeout = 5 * time.Second
 
 // Config is the per-instance settings for an XrayAdapter.
 type Config struct {
@@ -106,11 +113,12 @@ func (a *Adapter) Stop(ctx context.Context) error {
 	return err
 }
 
-// AddUser registers the user with the adapter, regenerates the config, and
-// restarts the xray subprocess. Brief (~1s) downtime per call.
+// AddUser registers the user with the adapter. N1: it first tries a LIVE add
+// via xray's HandlerService (`xray api adu`) so existing connections aren't
+// dropped; only if that isn't possible (xray not up yet, config-only mode, or
+// the API call fails) does it fall back to a full config-regen + restart.
 //
-// Idempotent: re-adding the same user with the same UUID is a no-op (no
-// restart triggered).
+// Idempotent: re-adding the same user with the same UUID is a no-op.
 func (a *Adapter) AddUser(user core.User) error {
 	if user.XrayUUID == "" {
 		// User has no Xray credentials — nothing to do.
@@ -134,20 +142,127 @@ func (a *Adapter) AddUser(user core.User) error {
 	}
 	a.users[user.UserID] = desired
 	a.mu.Unlock()
+	if a.liveUpdateUser(context.Background(), liveAdd, desired) {
+		return nil
+	}
 	return a.regenerateAndRestart(context.Background())
 }
 
-// RemoveUser drops the user from the state, regenerates, and restarts.
-// Idempotent: removing an unknown user is a no-op.
+// RemoveUser drops the user. N1: tries a live remove (`xray api rmu`) first,
+// falling back to a restart. Idempotent: removing an unknown user is a no-op.
 func (a *Adapter) RemoveUser(userID string) error {
 	a.mu.Lock()
-	if _, ok := a.users[userID]; !ok {
+	removed, ok := a.users[userID]
+	if !ok {
 		a.mu.Unlock()
 		return nil
 	}
 	delete(a.users, userID)
 	a.mu.Unlock()
+	if a.liveUpdateUser(context.Background(), liveRemove, removed) {
+		return nil
+	}
 	return a.regenerateAndRestart(context.Background())
+}
+
+type liveOp int
+
+const (
+	liveAdd liveOp = iota
+	liveRemove
+)
+
+// buildAduInbound renders the single-inbound JSON that `xray api adu` consumes:
+// the inbound tag + protocol + a settings block carrying just the one user.
+// Reuses buildUserInboundSettings so the shape can't drift from what the full
+// config emits (vless -> clients[{id,email,flow}], trojan -> clients[{password,
+// email}], etc).
+func buildAduInbound(inbound InboundConfig, target xrayClient) ([]byte, error) {
+	c := inbound.withDefaults()
+	return json.Marshal(map[string]any{
+		"tag":      c.Tag,
+		"protocol": userInboundProtocol(c),
+		"settings": buildUserInboundSettings(c, []xrayClient{target}),
+	})
+}
+
+// liveUpdateUser performs a single add/remove against the RUNNING xray via the
+// HandlerService and keeps the on-disk config in sync. Returns true on success;
+// false tells the caller to fall back to a full restart. restartMu-guarded so
+// it can't race a regenerateAndRestart; a.mu only for the fast snapshot.
+func (a *Adapter) liveUpdateUser(ctx context.Context, op liveOp, target xrayClient) bool {
+	a.restartMu.Lock()
+	defer a.restartMu.Unlock()
+
+	a.mu.Lock()
+	clients := sortedClients(a.users)
+	inbound := a.cfg.Inbound
+	cfgPath := a.cfg.ConfigPath
+	binPath := a.cfg.BinaryPath
+	run := a.cfg.RunCmd
+	proc := a.proc
+	a.mu.Unlock()
+
+	// Live mgmt only works against a running xray (HandlerService up). In
+	// config-only mode, before the first start, or mid-restart, bail to the
+	// restart path.
+	if binPath == "" || run == nil || proc == nil || !proc.Running() {
+		return false
+	}
+
+	// Keep the on-disk config current so a later restart has the same user set.
+	blob, err := renderConfig(inbound, clients)
+	if err != nil {
+		return false
+	}
+	if cfgPath != "" {
+		if err := writeConfig(cfgPath, blob); err != nil {
+			return false
+		}
+	}
+
+	cfg := inbound.withDefaults()
+	cctx, cancel := context.WithTimeout(ctx, apiCallTimeout)
+	defer cancel()
+	server := fmt.Sprintf("--server=127.0.0.1:%d", cfg.ApiPort)
+
+	switch op {
+	case liveAdd:
+		data, err := buildAduInbound(inbound, target)
+		if err != nil {
+			return false
+		}
+		tmp, err := os.CreateTemp("", "ice-xray-adu-*.json")
+		if err != nil {
+			return false
+		}
+		tmpPath := tmp.Name()
+		defer os.Remove(tmpPath)
+		if _, err := tmp.Write(data); err != nil {
+			_ = tmp.Close()
+			return false
+		}
+		if err := tmp.Close(); err != nil {
+			return false
+		}
+		if out, err := run(cctx, binPath, "api", "adu", server, tmpPath); err != nil {
+			a.logger.Warn("xray api adu failed; falling back to restart",
+				"email", target.Email, "err", err, "out", strings.TrimSpace(string(out)))
+			return false
+		}
+		a.logger.Info("xray user added live (no restart)", "email", target.Email)
+		return true
+	case liveRemove:
+		if out, err := run(cctx, binPath, "api", "rmu", server, "-tag="+cfg.Tag, target.Email); err != nil {
+			a.logger.Warn("xray api rmu failed; falling back to restart",
+				"email", target.Email, "err", err, "out", strings.TrimSpace(string(out)))
+			return false
+		}
+		a.logger.Info("xray user removed live (no restart)", "email", target.Email)
+		return true
+	default:
+		return false
+	}
 }
 
 // GetStats reports per-user byte counters via Xray's StatsService.
