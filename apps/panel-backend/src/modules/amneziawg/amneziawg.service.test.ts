@@ -9,6 +9,7 @@ import {
   allocatePeer,
   getPeer,
   listPeers,
+  preallocatePeers,
   releasePeer,
 } from './amneziawg.service.js';
 
@@ -149,5 +150,72 @@ describe('getPeer / listPeers / releasePeer', () => {
     const profileId = await createProfile();
     const u = await createUser('alice');
     await expect(releasePeer(profileId, u)).resolves.toBeUndefined();
+  });
+});
+
+describe('preallocatePeers (B7 bulk)', () => {
+  it('hands out distinct lowest free IPs to every user in one call', async () => {
+    const profileId = await createProfile();
+    const ids = [
+      await createUser('alice'),
+      await createUser('bob'),
+      await createUser('carol'),
+    ];
+
+    const map = await preallocatePeers(profileId, ids);
+    expect(map.size).toBe(3);
+    const ips = [...map.values()].sort();
+    expect(ips).toEqual(['10.66.66.2', '10.66.66.3', '10.66.66.4']);
+    expect(new Set(ips).size).toBe(3); // distinct
+  });
+
+  it('preserves existing peers and only fills the rest', async () => {
+    const profileId = await createProfile();
+    const u1 = await createUser('alice');
+    const u2 = await createUser('bob');
+    const existing = await allocatePeer(profileId, u1); // takes .2
+
+    const map = await preallocatePeers(profileId, [u1, u2]);
+    expect(map.get(u1)).toBe(existing.ip); // unchanged
+    expect(map.get(u2)).toBe('10.66.66.3'); // next free
+  });
+
+  it('reuses a gap left by a release', async () => {
+    const profileId = await createProfile();
+    const u1 = await createUser('alice');
+    const u2 = await createUser('bob');
+    const u3 = await createUser('carol');
+    await allocatePeer(profileId, u1); // .2
+    await allocatePeer(profileId, u2); // .3
+    await releasePeer(profileId, u1); // frees .2
+
+    const map = await preallocatePeers(profileId, [u3]);
+    expect(map.get(u3)).toBe('10.66.66.2'); // lowest free reused
+  });
+
+  it('is a no-op second call (idempotent), returning the same IPs', async () => {
+    const profileId = await createProfile();
+    const ids = [await createUser('alice'), await createUser('bob')];
+    const first = await preallocatePeers(profileId, ids);
+    const second = await preallocatePeers(profileId, ids);
+    expect([...second.entries()].sort()).toEqual([...first.entries()].sort());
+    const all = await listPeers(profileId);
+    expect(all).toHaveLength(2); // no duplicate rows
+  });
+
+  it('returns an empty map for no users', async () => {
+    const profileId = await createProfile();
+    const map = await preallocatePeers(profileId, []);
+    expect(map.size).toBe(0);
+  });
+
+  it('partially fills then leaves the overflow for the caller when exhausted', async () => {
+    const profileId = await createProfile();
+    const u1 = await createUser('alice');
+    const u2 = await createUser('bob');
+    // /30 has exactly one usable host (.2).
+    const map = await preallocatePeers(profileId, [u1, u2], '10.99.0.0/30');
+    expect(map.size).toBe(1); // only one user could be placed
+    expect([...map.values()]).toEqual(['10.99.0.2']);
   });
 });

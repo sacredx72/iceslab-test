@@ -5,7 +5,7 @@ import { prisma } from '../../prisma.js';
 import { mtprotoSecret } from '../../core-adapters/mtproto/index.js';
 import { NodeTransport, NodeRequestError } from '../nodes/nodes.transport.js';
 import { inboundSyncJobs } from '../../lib/metrics.js';
-import { allocatePeer } from '../amneziawg/amneziawg.service.js';
+import { allocatePeer, preallocatePeers } from '../amneziawg/amneziawg.service.js';
 import { getLogger } from '../../lib/logger.js';
 
 // ───── Job data shapes ─────
@@ -258,19 +258,37 @@ export async function applyInboundsForNode(nodeId: string): Promise<void> {
   // push, which compounds when multiple nodes need re-push at once.
   const awgIpByUser = new Map<string, string>();
   if (awgProfileId && awgSubnet) {
-    for (const u of users) {
-      if (!u.amneziawgPublicKey) continue;
-      try {
-        const peer = await allocatePeer(awgProfileId, u.id, awgSubnet);
-        awgIpByUser.set(u.id, peer.ip);
-      } catch (err) {
-        const detail = err instanceof Error ? err.message : String(err);
-        getLogger().info(
-          `[worker:inbound-sync] allocatePeer ${u.username} on profile ${awgProfileId} FAILED: ${detail}`,
-        );
-        // Fall through — addUser will silently skip the AWG portion on the
-        // node side, other protocols still work for this user.
+    const awgUsers = users.filter((u) => u.amneziawgPublicKey);
+    // B7 - one bulk allocation for the whole set instead of N serial
+    // allocatePeer round-trips. Stragglers (race loss / contention) fall back
+    // to the robust per-user allocator below.
+    const bulk = await preallocatePeers(
+      awgProfileId,
+      awgUsers.map((u) => u.id),
+      awgSubnet,
+    ).catch((err) => {
+      const detail = err instanceof Error ? err.message : String(err);
+      getLogger().info(
+        `[worker:inbound-sync] bulk preallocatePeers on profile ${awgProfileId} FAILED, per-user fallback: ${detail}`,
+      );
+      return new Map<string, string>();
+    });
+    for (const u of awgUsers) {
+      let ip = bulk.get(u.id);
+      if (!ip) {
+        try {
+          ip = (await allocatePeer(awgProfileId, u.id, awgSubnet)).ip;
+        } catch (err) {
+          const detail = err instanceof Error ? err.message : String(err);
+          getLogger().info(
+            `[worker:inbound-sync] allocatePeer ${u.username} on profile ${awgProfileId} FAILED: ${detail}`,
+          );
+          // Fall through — addUser will silently skip the AWG portion on the
+          // node side, other protocols still work for this user.
+          continue;
+        }
       }
+      awgIpByUser.set(u.id, ip);
     }
   }
 

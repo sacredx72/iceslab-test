@@ -152,3 +152,77 @@ export async function releasePeer(
 ): Promise<void> {
   await prisma.amneziawgPeer.deleteMany({ where: { profileId, userId } });
 }
+
+/**
+ * B7 - bulk-allocate AmneziaWG IPs for many users in one statement instead of
+ * N serial allocatePeer round-trips (a 1000-user node push used to do ~1000
+ * sequential queries before fanning out addUser). Assigns the lowest free IPs
+ * to users that don't yet have a peer on this profile.
+ *
+ * Same pigeonhole reasoning as allocatePeer: the N lowest free IPs all fall
+ * within the first `existing + needed` addresses (only `existing` are taken),
+ * so the candidate scan stays O(peers) rather than materialising the whole
+ * subnet. `ON CONFLICT DO NOTHING` (untargeted - covers both the (profile,ip)
+ * and (profile,user) unique constraints) makes it race-safe: a row that lost a
+ * race is simply skipped, and the caller falls back to allocatePeer() for any
+ * user still missing in the returned map.
+ *
+ * Returns the full userId -> ip map for the requested users (pre-existing peers
+ * plus freshly inserted ones). Users absent from the map either lost a race or
+ * the subnet is exhausted - the caller decides how to handle them.
+ */
+export async function preallocatePeers(
+  profileId: string,
+  userIds: string[],
+  subnet: string = DEFAULT_SUBNET,
+): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  if (userIds.length === 0) return result;
+
+  const range = parseSubnet(subnet);
+  const firstIp = intToIp(range.firstUsable);
+  const lastIp = intToIp(range.lastUsable);
+
+  await prisma.$executeRaw(Prisma.sql`
+    WITH
+      needed AS (
+        SELECT u.id AS user_id, row_number() OVER (ORDER BY u.id) AS rn
+        FROM unnest(ARRAY[${Prisma.join(userIds)}]::uuid[]) AS u(id)
+        WHERE NOT EXISTS (
+          SELECT 1 FROM amneziawg_peers p
+          WHERE p.profile_id = ${profileId}::uuid AND p.user_id = u.id
+        )
+      ),
+      cnt AS (SELECT count(*)::int AS n FROM needed),
+      free AS (
+        SELECT host((${firstIp}::inet) + gs) AS ip,
+               row_number() OVER (ORDER BY gs) AS rn
+        FROM generate_series(
+          0,
+          LEAST(
+            (${lastIp}::inet - ${firstIp}::inet)::int,
+            (SELECT count(*)::int FROM amneziawg_peers WHERE profile_id = ${profileId}::uuid)
+              + (SELECT n FROM cnt)
+          )
+        ) AS gs
+        WHERE NOT EXISTS (
+          SELECT 1 FROM amneziawg_peers p
+          WHERE p.profile_id = ${profileId}::uuid
+            AND p.ip = host((${firstIp}::inet) + gs)
+        )
+        ORDER BY gs
+        LIMIT (SELECT n FROM cnt)
+      )
+    INSERT INTO amneziawg_peers (id, profile_id, user_id, ip, created_at)
+    SELECT gen_random_uuid(), ${profileId}::uuid, n.user_id, f.ip, NOW()
+    FROM needed n JOIN free f ON n.rn = f.rn
+    ON CONFLICT DO NOTHING
+  `);
+
+  const rows = await prisma.amneziawgPeer.findMany({
+    where: { profileId, userId: { in: userIds } },
+    select: { userId: true, ip: true },
+  });
+  for (const r of rows) result.set(r.userId, r.ip);
+  return result;
+}
