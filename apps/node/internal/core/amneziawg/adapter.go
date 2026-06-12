@@ -54,9 +54,15 @@ type Adapter struct {
 	cfg    Config
 	logger *slog.Logger
 
-	mu      sync.Mutex
-	peers   map[string]Peer // key: userId
-	started bool
+	// restartMu serializes the slow config IO (awg-quick up/down, `awg
+	// syncconf`, systemctl restart) so at most one reload runs at a time. mu
+	// guards only the in-memory state below and is NEVER held across a CLI
+	// fork. Lock order is always restartMu -> mu; no path upgrades mu to
+	// restartMu, so the two can't deadlock (AWG#10).
+	restartMu sync.Mutex
+	mu        sync.Mutex
+	peers     map[string]Peer // key: userId
+	started   bool
 	// lastStats holds the previous cumulative kernel counters per peer, keyed
 	// by PublicKey to match `awg show dump`. GetStats diffs against it so the
 	// panel ingests per-poll DELTAS (the same contract the xray adapter meets
@@ -120,50 +126,70 @@ func (a *Adapter) Name() string { return Name }
 // restartInterfaceLocked which writes the config + awg-quick up and flips
 // `started` to true. Caught live cycle #6 2026-05-12 on awg-VPS.
 func (a *Adapter) Start(ctx context.Context) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+	a.restartMu.Lock()
+	defer a.restartMu.Unlock()
 
+	a.mu.Lock()
 	if a.cfg.Inbound.PrivateKey == "" {
+		iface := a.cfg.Inbound.Interface
+		a.mu.Unlock()
 		a.logger.Info("amneziawg adapter deferred — awaiting first ApplyInbound from panel",
-			"interface", a.cfg.Inbound.Interface)
+			"interface", iface)
 		return nil
 	}
+	inbound := a.cfg.Inbound
+	peers := sortedPeers(a.peers)
+	managed := a.cfg.AwgQuickBin != ""
+	a.mu.Unlock()
 
-	if err := a.writeCurrentConfigLocked(); err != nil {
+	if err := a.writeConfigSnapshot(inbound, peers); err != nil {
 		return err
 	}
 
-	if a.cfg.AwgQuickBin != "" {
-		if out, err := a.cfg.runCmd(ctx, a.cfg.AwgQuickBin, "up", a.cfg.Inbound.Interface); err != nil {
+	if managed {
+		if out, err := a.cfg.runCmd(ctx, a.cfg.AwgQuickBin, "up", inbound.Interface); err != nil {
 			// awg-quick up is idempotent-ish — failing because the iface is
 			// already up is fine. Anything else is a real error.
 			if !strings.Contains(strings.ToLower(string(out)), "already exists") {
-				return fmt.Errorf("awg-quick up %s failed: %w (%s)", a.cfg.Inbound.Interface, err, strings.TrimSpace(string(out)))
+				return fmt.Errorf("awg-quick up %s failed: %w (%s)", inbound.Interface, err, strings.TrimSpace(string(out)))
 			}
 		}
 	}
 
-	a.started = true
+	a.setStarted(true)
 	a.logger.Info("amneziawg adapter started",
-		"interface", a.cfg.Inbound.Interface,
-		"managed", a.cfg.AwgQuickBin != "")
+		"interface", inbound.Interface,
+		"managed", managed)
 	return nil
 }
 
 // Stop tears the interface down. Safe to call multiple times.
 func (a *Adapter) Stop(ctx context.Context) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.started = false
+	a.restartMu.Lock()
+	defer a.restartMu.Unlock()
 
-	if a.cfg.AwgQuickBin == "" {
+	a.mu.Lock()
+	a.started = false
+	managed := a.cfg.AwgQuickBin != ""
+	iface := a.cfg.Inbound.Interface
+	a.mu.Unlock()
+
+	if !managed {
 		return nil
 	}
-	if _, err := a.cfg.runCmd(ctx, a.cfg.AwgQuickBin, "down", a.cfg.Inbound.Interface); err != nil {
+	if _, err := a.cfg.runCmd(ctx, a.cfg.AwgQuickBin, "down", iface); err != nil {
 		// "iface not running" is expected on a clean stop after a failed start
 		a.logger.Warn("awg-quick down returned non-zero (often safe)", "err", err)
 	}
 	return nil
+}
+
+// setStarted flips the started flag under mu. Helper so the IO paths (which run
+// without mu held) can record readiness without re-deriving the lock dance.
+func (a *Adapter) setStarted(v bool) {
+	a.mu.Lock()
+	a.started = v
+	a.mu.Unlock()
 }
 
 // AddUser registers / updates a peer. No-op for users without amneziawg
@@ -172,30 +198,35 @@ func (a *Adapter) AddUser(user core.User) error {
 	if user.AmneziaWGPublicKey == "" || user.AmneziaWGAllowedIP == "" {
 		return nil
 	}
-
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
 	desired := Peer{
 		PublicKey: user.AmneziaWGPublicKey,
 		AllowedIP: ensureCIDR(user.AmneziaWGAllowedIP),
 	}
+
+	a.mu.Lock()
 	if existing, ok := a.peers[user.UserID]; ok && existing == desired {
-		return nil
+		a.mu.Unlock()
+		return nil // no change, no IO
 	}
 	a.peers[user.UserID] = desired
-	return a.regenerateAndSyncLocked(context.Background())
+	a.mu.Unlock()
+
+	// IO runs under restartMu (not mu), re-snapshotting the latest peer set so
+	// concurrent Add/Remove calls converge on the final config.
+	return a.syncConfigState(context.Background())
 }
 
 // RemoveUser drops the peer and reloads the interface. Idempotent.
 func (a *Adapter) RemoveUser(userID string) error {
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	if _, ok := a.peers[userID]; !ok {
+		a.mu.Unlock()
 		return nil
 	}
 	delete(a.peers, userID)
-	return a.regenerateAndSyncLocked(context.Background())
+	a.mu.Unlock()
+
+	return a.syncConfigState(context.Background())
 }
 
 // GetStats parses `awg show <iface> dump` and maps per-peer RX/TX counters
@@ -221,19 +252,22 @@ func (a *Adapter) RemoveUser(userID string) error {
 // shelling out, mirroring the old stub behaviour for dev environments
 // without amneziawg installed.
 func (a *Adapter) GetStats() (*core.Stats, error) {
+	// AWG#10 - read what we need under mu, then release it for the `awg show`
+	// fork so a slow/hung dump no longer blocks AddUser/RemoveUser. The delta
+	// accounting below re-acquires mu and runs verbatim (E4 contract preserved).
 	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	users := make([]core.UserStats, 0, len(a.peers))
-
-	if a.cfg.AwgBin == "" {
+	configOnly := a.cfg.AwgBin == ""
+	iface := a.cfg.Inbound.Interface
+	if configOnly {
+		users := make([]core.UserStats, 0, len(a.peers))
 		for id := range a.peers {
 			users = append(users, core.UserStats{UserID: id})
 		}
+		a.mu.Unlock()
 		return &core.Stats{Users: users}, nil
 	}
+	a.mu.Unlock()
 
-	iface := a.cfg.Inbound.Interface
 	if iface == "" {
 		iface = "awg0"
 	}
@@ -241,6 +275,11 @@ func (a *Adapter) GetStats() (*core.Stats, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	out, err := a.cfg.runCmd(ctx, a.cfg.AwgBin, "show", iface, "dump")
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	users := make([]core.UserStats, 0, len(a.peers))
 	if err != nil {
 		// Interface may be down or never started — fall back to zero counters
 		// rather than failing the whole stats poll.
@@ -405,9 +444,13 @@ func (a *Adapter) ApplyInbound(port int, rawCfg json.RawMessage) error {
 		return fmt.Errorf("amneziawg ApplyInbound: parse cfg: %w", err)
 	}
 
-	a.mu.Lock()
-	defer a.mu.Unlock()
+	// AWG#10 - hold restartMu across the whole apply so a concurrent AddUser
+	// sync can't interleave with the interface mutation; mutate + snapshot under
+	// mu, then run the reload IO without mu held. Lock order restartMu -> mu.
+	a.restartMu.Lock()
+	defer a.restartMu.Unlock()
 
+	a.mu.Lock()
 	// Slice 50: prefer the panel-pushed port over install-time fallback.
 	// Pre-slice-50 panel paths still work because port=0 falls through to
 	// a.cfg.Inbound.ListenPort below.
@@ -417,6 +460,7 @@ func (a *Adapter) ApplyInbound(port int, rawCfg json.RawMessage) error {
 	}
 	newInbound, err := wire.toInboundConfig(a.cfg.Inbound.Interface, listenPort)
 	if err != nil {
+		a.mu.Unlock()
 		return fmt.Errorf("amneziawg ApplyInbound: %w", err)
 	}
 	// Preserve install-time PostUp/PostDown and Interface defaults — those
@@ -428,90 +472,120 @@ func (a *Adapter) ApplyInbound(port int, rawCfg json.RawMessage) error {
 	kind := classifyDiff(a.cfg.Inbound, newInbound)
 	switch kind {
 	case diffNone:
+		a.mu.Unlock()
 		a.logger.Info("amneziawg ApplyInbound: config unchanged, skipping")
 		return nil
 	case diffSubnet:
 		if len(a.peers) > 0 {
-			return fmt.Errorf("amneziawg ApplyInbound: subnet change rejected — %d peer(s) already allocated; drain peers before changing subnet", len(a.peers))
+			n := len(a.peers)
+			a.mu.Unlock()
+			return fmt.Errorf("amneziawg ApplyInbound: subnet change rejected — %d peer(s) already allocated; drain peers before changing subnet", n)
 		}
 		// No peers: subnet change is safe and only needs a full restart to
 		// re-attach the new IP to the interface.
 		a.cfg.Inbound = newInbound
+		inbound := a.cfg.Inbound
+		peers := sortedPeers(a.peers)
+		a.mu.Unlock()
 		a.logger.Info("amneziawg ApplyInbound: subnet change with no peers, restarting interface",
 			"address", newInbound.Address)
-		return a.restartInterfaceLocked(context.Background())
+		return a.restartInterfaceFrom(context.Background(), inbound, peers)
 	case diffSyncconf:
 		a.cfg.Inbound = newInbound
+		inbound := a.cfg.Inbound
+		peers := sortedPeers(a.peers)
+		a.mu.Unlock()
 		a.logger.Info("amneziawg ApplyInbound: syncconf-eligible change", "iface", newInbound.Interface)
-		return a.regenerateAndSyncLocked(context.Background())
+		return a.syncFromSnapshot(context.Background(), inbound, peers)
 	case diffRestart:
 		a.cfg.Inbound = newInbound
+		inbound := a.cfg.Inbound
+		peers := sortedPeers(a.peers)
+		a.mu.Unlock()
 		a.logger.Info("amneziawg ApplyInbound: interface-level change, full restart",
 			"iface", newInbound.Interface)
-		return a.restartInterfaceLocked(context.Background())
+		return a.restartInterfaceFrom(context.Background(), inbound, peers)
 	default:
+		a.mu.Unlock()
 		return fmt.Errorf("amneziawg ApplyInbound: unknown diffKind %d", kind)
 	}
 }
 
-// restartInterfaceLocked writes the new config and bounces the interface via
-// awg-quick down/up. Used for changes that syncconf can't apply (H1-H4, keys,
-// listen port). Caller must hold a.mu.
+// restartInterfaceFrom writes the given config snapshot and bounces the
+// interface via awg-quick down/up. Used for changes that syncconf can't apply
+// (H1-H4, keys, listen port). Caller MUST hold restartMu and MUST NOT hold mu
+// (the awg-quick forks run lock-free; readiness is flipped via setStarted).
 //
 // In config-only mode (AwgQuickBin == "") we just rewrite the file and skip
 // the actual bounce — that's what the unit tests rely on, and what dev
 // machines without amneziawg installed need.
-func (a *Adapter) restartInterfaceLocked(parent context.Context) error {
-	if err := a.writeCurrentConfigLocked(); err != nil {
+func (a *Adapter) restartInterfaceFrom(parent context.Context, inbound InboundConfig, peers []Peer) error {
+	if err := a.writeConfigSnapshot(inbound, peers); err != nil {
 		return err
 	}
 	if a.cfg.AwgQuickBin == "" {
 		a.logger.Info("amneziawg restart skipped (config-only mode)")
-		a.started = true
+		a.setStarted(true)
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 	defer cancel()
 
-	if out, err := a.cfg.runCmd(ctx, a.cfg.AwgQuickBin, "down", a.cfg.Inbound.Interface); err != nil {
+	if out, err := a.cfg.runCmd(ctx, a.cfg.AwgQuickBin, "down", inbound.Interface); err != nil {
 		// "iface not running" is fine — we're about to bring it up.
 		a.logger.Warn("awg-quick down returned non-zero (often safe)",
 			"err", err, "out", strings.TrimSpace(string(out)))
 	}
-	if out, err := a.cfg.runCmd(ctx, a.cfg.AwgQuickBin, "up", a.cfg.Inbound.Interface); err != nil {
-		return fmt.Errorf("awg-quick up %s: %w (%s)", a.cfg.Inbound.Interface, err, strings.TrimSpace(string(out)))
+	if out, err := a.cfg.runCmd(ctx, a.cfg.AwgQuickBin, "up", inbound.Interface); err != nil {
+		return fmt.Errorf("awg-quick up %s: %w (%s)", inbound.Interface, err, strings.TrimSpace(string(out)))
 	}
 	// Mark started so Healthy() returns true and main.go's heartbeat sees
 	// a ready adapter after the first ApplyInbound on a freshly-bootstrapped
 	// node (Start() returned early because PrivateKey was empty).
-	a.started = true
-	a.logger.Info("amneziawg interface bounced", "iface", a.cfg.Inbound.Interface)
+	a.setStarted(true)
+	a.logger.Info("amneziawg interface bounced", "iface", inbound.Interface)
 	return nil
 }
 
-// regenerateAndSyncLocked must be called with a.mu held. It writes the
-// current config to disk and (when managed) reloads the running interface
-// via `awg syncconf`, falling back to `systemctl restart awg-quick@<iface>`
-// on failure or timeout.
-func (a *Adapter) regenerateAndSyncLocked(ctx context.Context) error {
-	if err := a.writeCurrentConfigLocked(); err != nil {
+// syncConfigState serializes config IO under restartMu, then snapshots the
+// CURRENT peer set + inbound under mu and writes + reloads without mu held.
+// Used by AddUser/RemoveUser. Concurrent callers converge: whoever runs the IO
+// re-reads the latest peers, so no peer is dropped to a stale snapshot.
+func (a *Adapter) syncConfigState(ctx context.Context) error {
+	a.restartMu.Lock()
+	defer a.restartMu.Unlock()
+
+	a.mu.Lock()
+	inbound := a.cfg.Inbound
+	peers := sortedPeers(a.peers)
+	a.mu.Unlock()
+
+	return a.syncFromSnapshot(ctx, inbound, peers)
+}
+
+// syncFromSnapshot writes the given config snapshot and (when managed) reloads
+// the running interface via `awg syncconf`, falling back to `systemctl restart
+// awg-quick@<iface>` on failure or timeout. Caller MUST hold restartMu and MUST
+// NOT hold mu.
+func (a *Adapter) syncFromSnapshot(ctx context.Context, inbound InboundConfig, peers []Peer) error {
+	if err := a.writeConfigSnapshot(inbound, peers); err != nil {
 		return err
 	}
 
 	if a.cfg.AwgQuickBin == "" {
-		a.logger.Info("amneziawg config written (config-only mode)", "peers", len(a.peers))
+		a.logger.Info("amneziawg config written (config-only mode)", "peers", len(peers))
 		return nil
 	}
 
-	if err := a.syncconfLocked(ctx); err != nil {
+	if err := a.syncconf(ctx, inbound.Interface); err != nil {
 		a.logger.Warn("awg syncconf failed; falling back to systemctl restart", "err", err)
-		return a.restartViaSystemctlLocked(ctx)
+		return a.restartViaSystemctl(ctx, inbound.Interface)
 	}
-	a.logger.Info("amneziawg synced", "peers", len(a.peers))
+	a.logger.Info("amneziawg synced", "peers", len(peers))
 	return nil
 }
 
-func (a *Adapter) syncconfLocked(parent context.Context) error {
+func (a *Adapter) syncconf(parent context.Context, iface string) error {
 	ctx, cancel := context.WithTimeout(parent, a.cfg.SyncTimeout)
 	defer cancel()
 
@@ -534,20 +608,20 @@ func (a *Adapter) syncconfLocked(parent context.Context) error {
 		return fmt.Errorf("close temp: %w", err)
 	}
 
-	out, err := a.cfg.runCmd(ctx, a.cfg.AwgBin, "syncconf", a.cfg.Inbound.Interface, tmpPath)
+	out, err := a.cfg.runCmd(ctx, a.cfg.AwgBin, "syncconf", iface, tmpPath)
 	if err != nil {
 		return fmt.Errorf("awg syncconf: %w (%s)", err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
 
-func (a *Adapter) restartViaSystemctlLocked(parent context.Context) error {
+func (a *Adapter) restartViaSystemctl(parent context.Context, iface string) error {
 	if a.cfg.SystemctlBin == "" {
 		return errors.New("syncconf failed and no SystemctlBin configured for fallback")
 	}
 	ctx, cancel := context.WithTimeout(parent, 15*time.Second)
 	defer cancel()
-	unit := "awg-quick@" + a.cfg.Inbound.Interface
+	unit := "awg-quick@" + iface
 	out, err := a.cfg.runCmd(ctx, a.cfg.SystemctlBin, "restart", unit)
 	if err != nil {
 		return fmt.Errorf("systemctl restart %s: %w (%s)", unit, err, strings.TrimSpace(string(out)))
@@ -555,9 +629,8 @@ func (a *Adapter) restartViaSystemctlLocked(parent context.Context) error {
 	return nil
 }
 
-func (a *Adapter) writeCurrentConfigLocked() error {
-	peers := sortedPeers(a.peers)
-	blob, err := renderConfig(a.cfg.Inbound, peers)
+func (a *Adapter) writeConfigSnapshot(inbound InboundConfig, peers []Peer) error {
+	blob, err := renderConfig(inbound, peers)
 	if err != nil {
 		return fmt.Errorf("render amneziawg config: %w", err)
 	}

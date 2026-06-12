@@ -3,12 +3,15 @@ package amneziawg
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/icecompany-tech/iceslab/apps/node/internal/core"
 )
@@ -346,3 +349,74 @@ type stubErr string
 func (s stubErr) Error() string { return string(s) }
 
 var errBoom = stubErr("boom")
+
+// AWG#10 - hammer the reload paths (AddUser/RemoveUser holding restartMu, the
+// lock-free GetStats `awg show`, and the background Healthy probe) concurrently
+// in managed mode. Run with `-race` this proves the restartMu/mu split is
+// data-race free; the 20s watchdog proves it can't deadlock (the lock order is
+// strictly restartMu -> mu, never the reverse).
+func TestAdapter_ConcurrentReloadsNoRaceNoDeadlock(t *testing.T) {
+	dir := t.TempDir()
+	var cmdMu sync.Mutex
+	calls := 0
+	a := New(Config{
+		Inbound:      validInbound(),
+		ConfigPath:   filepath.Join(dir, "awg0.conf"),
+		AwgBin:       "/usr/bin/awg",
+		AwgQuickBin:  "/usr/bin/awg-quick",
+		SystemctlBin: "/usr/bin/systemctl",
+		runCmd: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			cmdMu.Lock()
+			calls++
+			cmdMu.Unlock()
+			if len(args) > 0 && args[0] == "show" {
+				return []byte(fakeAwgDump), nil
+			}
+			if len(args) > 0 && args[0] == "strip" {
+				return []byte("[Interface]\nPrivateKey = x\n"), nil
+			}
+			return []byte(""), nil
+		},
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	a.cfg.Inbound.Interface = "awg0"
+
+	if err := a.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	const workers = 8
+	const iters = 25
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			uid := fmt.Sprintf("u%d", w)
+			ip := fmt.Sprintf("10.66.66.%d/32", w+2)
+			for i := 0; i < iters; i++ {
+				_ = a.AddUser(core.User{UserID: uid, AmneziaWGPublicKey: testWGPubKeyA, AmneziaWGAllowedIP: ip})
+				_, _ = a.GetStats()
+				_ = a.Healthy()
+				_ = a.RemoveUser(uid)
+			}
+		}(w)
+	}
+	// Extra reader goroutine: GetStats/Healthy must never block on the writers'
+	// syncconf IO (the whole point of the split).
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iters*workers; i++ {
+			_, _ = a.GetStats()
+			_ = a.Healthy()
+		}
+	}()
+
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(20 * time.Second):
+		t.Fatal("concurrent reloads deadlocked (20s watchdog)")
+	}
+}
