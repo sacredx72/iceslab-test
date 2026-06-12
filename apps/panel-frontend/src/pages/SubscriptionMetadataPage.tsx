@@ -64,6 +64,9 @@ export function SubscriptionMetadataPage() {
     mutationFn: updateSettings,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['settings'] });
+      // LOW: re-seed the form from the refetched (server-normalised) values so
+      // it never shows a stale/un-normalised local value after save.
+      setHydrated(false);
       notifications.show({
         color: 'green',
         message: t('settings.subscription.saved'),

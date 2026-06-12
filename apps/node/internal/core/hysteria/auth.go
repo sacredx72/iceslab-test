@@ -79,6 +79,10 @@ func (a *Adapter) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)
 		return
 	}
+	// LOW: cap the auth-callback body. It's a tiny JSON (auth secret + addr);
+	// without a limit a malicious/buggy caller could stream an unbounded body
+	// into the decoder. 4 KiB is generous for the real shape.
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
 	var req AuthRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid body", http.StatusBadRequest)
