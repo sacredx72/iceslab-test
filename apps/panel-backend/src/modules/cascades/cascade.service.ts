@@ -1,6 +1,7 @@
 import { Prisma } from '../../generated/prisma/client.js';
 import { prisma } from '../../prisma.js';
 import { validateCascadeHops } from './cascade.validation.js';
+import { generateLinkCreds } from './cascade.config.js';
 import type { CreateCascadeInput, UpdateCascadeInput } from './cascade.schemas.js';
 import { mapCascade, type CascadeDto } from './cascade.mapper.js';
 
@@ -58,17 +59,20 @@ export async function getCascade(id: string): Promise<CascadeDto> {
 export async function createCascade(input: CreateCascadeInput): Promise<CascadeDto> {
   const hops = validateCascadeHops(input.hops);
   await assertNodesExist(hops.map((h) => h.nodeId));
+  // C2 - pre-generate inter-hop link creds; stored on each non-exit hop.
+  const creds = generateLinkCreds(hops.length);
   try {
     const c = await prisma.cascade.create({
       data: {
         name: input.name,
         enabled: input.enabled,
         hops: {
-          create: hops.map((h) => ({
+          create: hops.map((h, idx) => ({
             nodeId: h.nodeId,
             position: h.position,
             entryProtocol: h.entryProtocol ?? null,
             linkProtocol: h.linkProtocol ?? null,
+            ...(idx < hops.length - 1 ? { linkConfig: creds[idx] } : {}),
           })),
         },
       },
@@ -89,6 +93,7 @@ export async function updateCascade(id: string, input: UpdateCascadeInput): Prom
 
   const hops = input.hops ? validateCascadeHops(input.hops) : null;
   if (hops) await assertNodesExist(hops.map((h) => h.nodeId));
+  const creds = hops ? generateLinkCreds(hops.length) : [];
 
   try {
     const c = await prisma.$transaction(async (tx) => {
@@ -104,12 +109,13 @@ export async function updateCascade(id: string, input: UpdateCascadeInput): Prom
         // set rather than diffing.
         await tx.cascadeHop.deleteMany({ where: { cascadeId: id } });
         await tx.cascadeHop.createMany({
-          data: hops.map((h) => ({
+          data: hops.map((h, idx) => ({
             cascadeId: id,
             nodeId: h.nodeId,
             position: h.position,
             entryProtocol: h.entryProtocol ?? null,
             linkProtocol: h.linkProtocol ?? null,
+            ...(idx < hops.length - 1 ? { linkConfig: creds[idx] } : {}),
           })),
         });
       }
