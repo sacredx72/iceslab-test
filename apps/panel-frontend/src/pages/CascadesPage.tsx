@@ -37,7 +37,7 @@ import {
 } from '../lib/api';
 
 const PROTOCOLS: { value: CascadeProtocol; label: string }[] = [
-  { value: 'xray', label: 'xray (vless/REALITY)' },
+  { value: 'xray', label: 'xray' },
   { value: 'hysteria', label: 'hysteria2' },
   { value: 'shadowsocks', label: 'shadowsocks' },
   { value: 'amneziawg', label: 'amneziawg' },

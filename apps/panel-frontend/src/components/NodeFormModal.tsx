@@ -33,7 +33,7 @@ import {
 import { COUNTRY_OPTIONS } from '../lib/countries';
 
 const PROTOCOL_OPTIONS: { value: NodeProtocol; label: string }[] = [
-  { value: 'xray', label: 'Xray (VLESS / Trojan + REALITY)' },
+  { value: 'xray', label: 'Xray' },
   { value: 'hysteria', label: 'Hysteria 2' },
   { value: 'amneziawg', label: 'AmneziaWG' },
   { value: 'naive', label: 'NaiveProxy' },

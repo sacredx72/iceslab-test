@@ -17,7 +17,7 @@ export interface ProtocolOption {
 // lands as an engine it goes right after xray:
 //   xray, sing-box, hysteria, amneziawg, naive, shadowsocks, mtproto, mieru
 export const PROTOCOL_OPTIONS: ProtocolOption[] = [
-  { value: 'xray', label: 'Xray (VLESS / Trojan + REALITY)' },
+  { value: 'xray', label: 'Xray' },
   { value: 'hysteria', label: 'Hysteria 2' },
   { value: 'amneziawg', label: 'AmneziaWG' },
   { value: 'naive', label: 'NaiveProxy' },
