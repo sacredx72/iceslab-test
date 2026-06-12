@@ -165,64 +165,88 @@ async function syncBackfillNode(nodeId: string): Promise<void> {
     amneziawgPublicKey: string;
   }
 
-  const users: BackfillUserRow[] = await prisma.user.findMany({
-    where: { deletedAt: null, status: 'active' },
-    select: {
-      id: true,
-      shortId: true,
-      username: true,
-      hysteriaPassword: true,
-      naivePassword: true,
-      xrayUuid: true,
-      amneziawgPublicKey: true,
-    },
-  });
+  // B14 - stream active users in id-ordered cursor pages instead of loading the
+  // whole active set into memory, and fan out addUser in bounded chunks rather
+  // than one unbounded Promise.allSettled (a 1000-user backfill previously fired
+  // 1000 simultaneous mTLS calls at the single-process Go agent). PAGE bounds
+  // memory; CHUNK bounds in-flight requests (mirrors inbounds.queue's value).
+  const BACKFILL_PAGE = 500;
+  const ADD_USER_CHUNK = 25;
+  const transport = new NodeTransport(node);
 
-  if (users.length === 0) {
+  const failures: { username: string; reason: unknown }[] = [];
+  let total = 0;
+  let cursor: string | undefined;
+
+  for (;;) {
+    const page: BackfillUserRow[] = await prisma.user.findMany({
+      where: { deletedAt: null, status: 'active' },
+      select: {
+        id: true,
+        shortId: true,
+        username: true,
+        hysteriaPassword: true,
+        naivePassword: true,
+        xrayUuid: true,
+        amneziawgPublicKey: true,
+      },
+      orderBy: { id: 'asc' },
+      take: BACKFILL_PAGE,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    });
+    if (page.length === 0) break;
+    cursor = page[page.length - 1]!.id;
+    total += page.length;
+
+    for (let i = 0; i < page.length; i += ADD_USER_CHUNK) {
+      const chunk = page.slice(i, i + ADD_USER_CHUNK);
+      const results = await Promise.allSettled(
+        chunk.map((u) => {
+          const req: AddUserRequest = {
+            userId: u.id,
+            shortId: u.shortId,
+            username: u.username,
+            credentials: {
+              hysteriaPassword: u.hysteriaPassword,
+              naivePassword: u.naivePassword,
+              xrayUuid: u.xrayUuid,
+              amneziawgPublicKey: u.amneziawgPublicKey,
+            },
+          };
+          return transport.addUser(req);
+        }),
+      );
+      for (let j = 0; j < results.length; j++) {
+        const r = results[j]!;
+        if (r.status === 'rejected') {
+          const reason = r.reason;
+          const detail =
+            reason instanceof NodeRequestError
+              ? `${reason.status} ${reason.message}`
+              : String(reason);
+          getLogger().info(
+            `[worker:node-users] backfillNode ${node.name} → ${chunk[j]!.username} FAILED: ${detail}`,
+          );
+          failures.push({ username: chunk[j]!.username, reason });
+        }
+      }
+    }
+
+    if (page.length < BACKFILL_PAGE) break;
+  }
+
+  if (total === 0) {
     getLogger().info(`[worker:node-users] backfillNode ${node.name} — no active users, skipping`);
     return;
   }
 
-  getLogger().info(`[worker:node-users] backfillNode ${node.name} — pushing ${users.length} user(s)`);
-
-  const transport = new NodeTransport(node);
-  const results = await Promise.allSettled(
-    users.map(async (u: BackfillUserRow) => {
-      const req: AddUserRequest = {
-        userId: u.id,
-        shortId: u.shortId,
-        username: u.username,
-        credentials: {
-          hysteriaPassword: u.hysteriaPassword,
-          naivePassword: u.naivePassword,
-          xrayUuid: u.xrayUuid,
-          amneziawgPublicKey: u.amneziawgPublicKey,
-        },
-      };
-      await transport.addUser(req);
-    }),
-  );
-
-  const failures = results.flatMap(
-    (r: PromiseSettledResult<void>, i: number) =>
-      r.status === 'rejected' ? [{ user: users[i]!, reason: r.reason }] : [],
-  );
-  for (const f of failures as { user: BackfillUserRow; reason: unknown }[]) {
-    const detail =
-      f.reason instanceof NodeRequestError
-        ? `${f.reason.status} ${f.reason.message}`
-        : String(f.reason);
-    getLogger().info(
-      `[worker:node-users] backfillNode ${node.name} → ${f.user.username} FAILED: ${detail}`,
-    );
-  }
   if (failures.length > 0) {
     throw new AggregateError(
       failures.map((f) => f.reason),
-      `${failures.length}/${users.length} users failed to backfill onto ${node.name}`,
+      `${failures.length}/${total} users failed to backfill onto ${node.name}`,
     );
   }
-  getLogger().info(`[worker:node-users] backfillNode ${node.name} — ${users.length} user(s) ok`);
+  getLogger().info(`[worker:node-users] backfillNode ${node.name} — ${total} user(s) ok`);
 }
 
 // ───── Worker ─────
