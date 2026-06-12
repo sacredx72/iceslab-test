@@ -1,4 +1,5 @@
 import { prisma } from '../../src/prisma.js';
+import { _resetBindingsCacheForTest } from '../../src/modules/subscription/subscription.bindings-cache.js';
 
 // Listed in the order they need truncating. CASCADE handles FKs but explicit
 // listing is documentation. Anything that references another table comes first.
@@ -29,6 +30,12 @@ export async function cleanDatabase(): Promise<void> {
   await prisma.$executeRawUnsafe(
     `TRUNCATE TABLE ${list} RESTART IDENTITY CASCADE`,
   );
+  // B6 - the squad-set binding cache is in-process and survives a DB truncate.
+  // The "All" squad below is re-seeded with a FIXED id, so without this reset a
+  // later test that creates no bindings (fires no bust event) would be served a
+  // prior test's cached binding-set under the same key. Treat truncation as the
+  // ultimate out-of-band change and clear the cache here, per test.
+  _resetBindingsCacheForTest();
   // Re-seed the "All" squad — slice 26 wired user-create to default to it,
   // so an empty groups table makes every user-create fail with FK violation.
   // The seed migration installs this row in production; tests truncate it
