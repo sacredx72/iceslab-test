@@ -7,6 +7,7 @@ const FormatEnum = z.enum([
   'clash',
   'singbox',
   'xrayjson',
+  'xkeen',
   'wgconf',
   'mieru-json',
 ]);

@@ -189,4 +189,31 @@ describe('buildXrayJson', () => {
       expect(cfg.observatory).toBeDefined();
     });
   });
+
+  // XKeen / router target (?format=xkeen).
+  describe('forRouter (xkeen)', () => {
+    it('omits log and the client inbound, keeps outbounds + routing', () => {
+      const cfg = parse(buildXrayJson([xrayEp], { forRouter: true }));
+      expect(cfg.log).toBeUndefined();
+      expect(cfg.inbounds).toBeUndefined();
+      // proxy + freedom + blackhole still present for routing rules to reference.
+      expect(cfg.outbounds.find((o: any) => o.protocol === 'vless')).toBeDefined();
+      expect(cfg.outbounds.find((o: any) => o.protocol === 'freedom')).toBeDefined();
+      expect(cfg.outbounds.find((o: any) => o.protocol === 'blackhole')).toBeDefined();
+      expect(cfg.routing.rules[0].outboundTag).toBe('eu-1-xray');
+    });
+
+    it('still emits split-DNS + ru-split rules when the preset is ru-split', () => {
+      const cfg = parse(buildXrayJson([xrayEp], { forRouter: true, routingPreset: 'ru-split' }));
+      expect(cfg.inbounds).toBeUndefined();
+      expect(cfg.dns.servers).toHaveLength(2);
+      expect(cfg.routing.rules[0].outboundTag).toBe('block');
+    });
+
+    it('desktop (client) form is unchanged: keeps log + inbound', () => {
+      const cfg = parse(buildXrayJson([xrayEp]));
+      expect(cfg.log).toBeDefined();
+      expect(cfg.inbounds).toHaveLength(1);
+    });
+  });
 });

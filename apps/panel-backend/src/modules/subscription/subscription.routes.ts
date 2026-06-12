@@ -26,7 +26,7 @@ const TokenParamSchema = z.object({
   token: z.string().min(8).max(128),
 });
 
-const FormatEnum = z.enum(['plain', 'json', 'clash', 'singbox', 'wgconf', 'xrayjson']);
+const FormatEnum = z.enum(['plain', 'json', 'clash', 'singbox', 'wgconf', 'xrayjson', 'xkeen']);
 type Format = z.infer<typeof FormatEnum>;
 
 const QuerySchema = z.object({
@@ -452,7 +452,7 @@ export async function subscriptionRoutes(app: FastifyInstance): Promise<void> {
       // per-squad override, then the panel-wide setting. plain/json/wgconf
       // carry no routing section, so we skip the read there.
       let routingPreset: RoutingPresetId = 'proxy-all';
-      if (format === 'clash' || format === 'singbox' || format === 'xrayjson') {
+      if (format === 'clash' || format === 'singbox' || format === 'xrayjson' || format === 'xkeen') {
         routingPreset =
           query.routing ??
           result.squadRoutingPreset ??
@@ -502,6 +502,23 @@ export async function subscriptionRoutes(app: FastifyInstance): Promise<void> {
           return reply
             .type('application/json')
             .send(buildXrayJson(filtered, { bundle: xjBundle, routingPreset }));
+        }
+        case 'xkeen': {
+          // XKeen (xray-core on Keenetic routers): outbounds + routing +
+          // split-DNS, NO client inbound (router provides tproxy). Drop-in for
+          // confdir 04_outbounds / 05_routing (+ 02_dns). routingPreset is
+          // resolved above (defaults to the panel/squad RU-split when set).
+          const xkBundle: 'flat' | 'balancer' | undefined =
+            query.bundle === 'balancer' || query.bundle === 'flat'
+              ? query.bundle
+              : undefined;
+          return reply
+            .type('application/json')
+            .header(
+              'Content-Disposition',
+              `attachment; filename="${sanitizeFilename(result.json.user.username)}-xkeen.json"`,
+            )
+            .send(buildXrayJson(filtered, { bundle: xkBundle, routingPreset, forRouter: true }));
         }
         case 'plain':
         default:

@@ -39,6 +39,7 @@ const FORMAT_COLORS: Record<string, string> = {
   singbox: 'blue',
   wgconf: 'teal',
   xrayjson: 'violet',
+  xkeen: 'grape',
 };
 
 export function SrrPage() {

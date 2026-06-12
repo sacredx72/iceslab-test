@@ -7,6 +7,7 @@ export const SrrFormat = z.enum([
   'singbox',
   'wgconf',
   'xrayjson',
+  'xkeen',
 ]);
 
 /**

@@ -46,6 +46,16 @@ export interface XrayJsonBuildOpts {
   probeUrl?: string;
   probeIntervalSec?: number;
   routingPreset?: RoutingPresetId;
+  /**
+   * XKeen / router target (`?format=xkeen`). XKeen runs xray-core on a Keenetic
+   * router via a confdir split (01_log / 02_dns / 03_inbounds / 04_outbounds /
+   * 05_routing ...). The router supplies its own log + transparent inbound, so
+   * we omit `log` and `inbounds` and emit only outbounds + routing (+ split-DNS
+   * when ru-split). The result is a drop-in for the router's 04_outbounds +
+   * 05_routing (+ 02_dns) files. All the REALITY/transport/balancer logic is
+   * shared with the desktop xrayjson format.
+   */
+  forRouter?: boolean;
 }
 
 const RU_SPLIT_RULES: ReadonlyArray<Record<string, unknown>> = [
@@ -186,18 +196,24 @@ export function buildXrayJson(
     ? [{ tag: 'balancer-auto', selector: proxyTags, strategy: { type: 'leastPing' } }]
     : undefined;
 
+  // forRouter (XKeen): drop log + the client SOCKS inbound; the router owns
+  // those. Keep dns (ru-split), outbounds and routing.
   const config: Record<string, unknown> = {
-    log: { loglevel: 'warning' },
+    ...(opts.forRouter ? {} : { log: { loglevel: 'warning' } }),
     ...(ruSplit ? { dns: RU_SPLIT_DNS } : {}),
-    inbounds: [
-      {
-        tag: 'socks-in',
-        port: 10808,
-        listen: '127.0.0.1',
-        protocol: 'socks',
-        settings: { auth: 'noauth', udp: true },
-      },
-    ],
+    ...(opts.forRouter
+      ? {}
+      : {
+          inbounds: [
+            {
+              tag: 'socks-in',
+              port: 10808,
+              listen: '127.0.0.1',
+              protocol: 'socks',
+              settings: { auth: 'noauth', udp: true },
+            },
+          ],
+        }),
     outbounds: [
       ...proxyOutbounds,
       { tag: 'direct', protocol: 'freedom' },

@@ -58,6 +58,7 @@ const FORMAT_OPTIONS = [
   { value: 'clash', label: 'Clash YAML' },
   { value: 'singbox', label: 'Sing-box JSON' },
   { value: 'xrayjson', label: 'Xray JSON' },
+  { value: 'xkeen', label: 'XKeen (router)' },
   { value: 'wgconf', label: 'wg-quick' },
   { value: 'mieru-json', label: 'Mieru JSON' },
 ];

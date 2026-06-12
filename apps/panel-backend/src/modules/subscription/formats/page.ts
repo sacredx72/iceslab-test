@@ -171,10 +171,14 @@ export function buildSubscriptionPage(data: SubscriptionPageData): string {
     u.status === 'active' ? '#A7D8B9' : u.status === 'limited' ? '#F5B14C' : '#E07A5F';
 
   const hasAwg = data.protocols.includes('amneziawg');
+  const hasXray = data.protocols.includes('xray');
   const proxyDownloads: { label: string; fmt: string }[] = [
     { label: 'Clash', fmt: 'clash' },
     { label: 'Sing-box', fmt: 'singbox' },
     { label: 'Xray JSON', fmt: 'xrayjson' },
+    // XKeen (xray-core on Keenetic routers) - only useful when an xray endpoint
+    // exists (it emits xray outbounds + routing for the router's confdir).
+    ...(hasXray ? [{ label: 'XKeen', fmt: 'xkeen' }] : []),
     { label: 'Base64', fmt: 'plain' },
   ];
 
