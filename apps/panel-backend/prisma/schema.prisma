@@ -265,6 +265,7 @@ model Node {
   userUsageHistory NodeUserUsageHistory[]
   usageHistory     NodeUsageHistory[]
   bootstrapTokens NodeBootstrapToken[]
+  cascadeHops     CascadeHop[]
   region          Region?  @relation(fields: [regionId], references: [id], onDelete: SetNull)
 
   @@index([status])
@@ -644,4 +645,51 @@ model AppSetting {
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@map("app_settings")
+}
+
+// ───── Section C: Cascades (multi-hop) ───────────────────────────────────────
+//
+// A cascade is an ordered chain of nodes: entry -> [transit...] -> exit. Clients
+// connect to the ENTRY node's user-facing inbound; traffic is proxy-chained
+// (terminate-at-each-hop, so the entry can split-route) hop to hop to the EXIT,
+// which egresses direct. See docs/ROADMAP.md "C. Каскады" for the full design.
+//
+// C1 = this data model. Config generation (C2) and node-agent outbound-chaining
+// (C3) build on it. The protocol enums below are stored as free strings (the
+// full 7-core set); the node-agent realises them cell by cell, native first
+// (xray entry -> vless/ss2022/wg links), bridges later.
+model Cascade {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @unique @db.VarChar(64)
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  hops CascadeHop[]
+
+  @@map("cascades")
+}
+
+// One ordered hop. position 0 = entry, highest = exit.
+//   - entryProtocol: the client-facing protocol; set ONLY on the entry hop.
+//   - linkProtocol:  the protocol to the NEXT hop; NULL on the exit hop (which
+//                    egresses direct via freedom/direct).
+//   - linkConfig:    generated inter-hop link credentials (filled by C2).
+model CascadeHop {
+  id            String   @id @default(uuid()) @db.Uuid
+  cascadeId     String   @map("cascade_id") @db.Uuid
+  nodeId        String   @map("node_id") @db.Uuid
+  position      Int
+  entryProtocol String?  @map("entry_protocol") @db.VarChar(32)
+  linkProtocol  String?  @map("link_protocol") @db.VarChar(32)
+  linkConfig    Json?    @map("link_config")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  cascade Cascade @relation(fields: [cascadeId], references: [id], onDelete: Cascade)
+  node    Node    @relation(fields: [nodeId], references: [id], onDelete: Restrict)
+
+  // One hop per position within a cascade; a node may appear in many cascades.
+  @@unique([cascadeId, position])
+  @@index([nodeId])
+  @@map("cascade_hops")
 }
