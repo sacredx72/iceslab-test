@@ -31,6 +31,7 @@ import {
   updateCascade,
   deleteCascade,
   listNodes,
+  apiErrorMessage,
   type Cascade,
   type CascadeHopInput,
   type CascadeProtocol,
@@ -71,7 +72,7 @@ export function CascadesPage() {
     notifications.show({
       color: 'red',
       title: t('common.saveError'),
-      message: err instanceof Error ? err.message : String(err),
+      message: apiErrorMessage(err),
     });
 
   const deleteMutation = useMutation({
@@ -263,7 +264,7 @@ function CascadeFormModal({
     <Modal
       opened={opened}
       onClose={onClose}
-      size="lg"
+      size="xl"
       title={cascade ? t('cascades.editTitle', { name: cascade.name }) : t('cascades.newTitle')}
     >
       <Stack gap="sm">
@@ -305,7 +306,7 @@ function CascadeFormModal({
                     searchable
                     value={h.nodeId || null}
                     onChange={(v) => setHop(i, { nodeId: v ?? '' })}
-                    style={{ flex: 1 }}
+                    style={{ flex: 1, minWidth: 180 }}
                   />
                   {isEntry && (
                     <Select
