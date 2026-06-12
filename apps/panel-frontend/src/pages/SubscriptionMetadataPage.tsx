@@ -41,6 +41,8 @@ export function SubscriptionMetadataPage() {
   const [intervalHours, setIntervalHours] = useState<number | ''>(24);
   const [supportUrl, setSupportUrl] = useState('');
   const [announceTemplate, setAnnounceTemplate] = useState('');
+  const [customRulesText, setCustomRulesText] = useState('');
+  const [customRulesError, setCustomRulesError] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
@@ -49,6 +51,11 @@ export function SubscriptionMetadataPage() {
       setIntervalHours(settingsQuery.data.subscriptionUpdateIntervalHours ?? 24);
       setSupportUrl(settingsQuery.data.subscriptionSupportUrl ?? '');
       setAnnounceTemplate(settingsQuery.data.subscriptionAnnounceTemplate ?? '');
+      setCustomRulesText(
+        settingsQuery.data.subscriptionCustomRoutingRules
+          ? JSON.stringify(settingsQuery.data.subscriptionCustomRoutingRules, null, 2)
+          : '',
+      );
       setHydrated(true);
     }
   }, [settingsQuery.data, hydrated]);
@@ -101,6 +108,31 @@ export function SubscriptionMetadataPage() {
         typeof intervalHours === 'number' ? intervalHours : 24,
       subscriptionSupportUrl: supportUrl.trim() || null,
       subscriptionAnnounceTemplate: announceTemplate.trim() || null,
+    });
+  }
+
+  // R3-b - parse + validate the raw rules JSON before saving. Empty clears it.
+  function saveCustomRules() {
+    const text = customRulesText.trim();
+    if (text === '') {
+      setCustomRulesError(null);
+      routingMutation.mutate({ subscriptionCustomRoutingRules: null });
+      return;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      setCustomRulesError(t('settings.subscription.customRulesInvalidJson'));
+      return;
+    }
+    if (!Array.isArray(parsed) || !parsed.every((r) => r !== null && typeof r === 'object')) {
+      setCustomRulesError(t('settings.subscription.customRulesNotArray'));
+      return;
+    }
+    setCustomRulesError(null);
+    routingMutation.mutate({
+      subscriptionCustomRoutingRules: parsed as Record<string, unknown>[],
     });
   }
 
@@ -209,6 +241,47 @@ export function SubscriptionMetadataPage() {
             />
           </Stack>
         </Radio.Group>
+      </Card>
+
+      <Card withBorder padding="lg" radius="md">
+        <Group gap="sm" mb="md">
+          <ThemeIcon size={32} radius="md" variant="light" color="grape">
+            <IconRoute size={18} />
+          </ThemeIcon>
+          <Stack gap={0}>
+            <Text fw={600}>{t('settings.subscription.customRulesTitle')}</Text>
+            <Text size="xs" c="dimmed">
+              {t('settings.subscription.customRulesDesc')}
+            </Text>
+          </Stack>
+        </Group>
+        <Stack gap="sm" maw={620}>
+          <Textarea
+            label={t('settings.subscription.customRulesLabel')}
+            description={t('settings.subscription.customRulesHint')}
+            value={customRulesText}
+            onChange={(e) => {
+              setCustomRulesText(e.currentTarget.value);
+              if (customRulesError) setCustomRulesError(null);
+            }}
+            error={customRulesError}
+            placeholder={'[\n  { "type": "field", "domain": ["geosite:category-ru"], "outboundTag": "direct" }\n]'}
+            autosize
+            minRows={4}
+            maxRows={16}
+            styles={{ input: { fontFamily: 'monospace', fontSize: 12 } }}
+          />
+          <Group justify="flex-end">
+            <PrimaryButton
+              onClick={saveCustomRules}
+              loading={routingMutation.isPending}
+              disabled={settingsQuery.isLoading}
+              leftSection={<IconCheck size={14} />}
+            >
+              {t('common.save')}
+            </PrimaryButton>
+          </Group>
+        </Stack>
       </Card>
     </Stack>
   );

@@ -1174,6 +1174,8 @@ export interface AdminSettings extends PublicSettings {
   subscriptionSupportUrl?: string | null;
   subscriptionAnnounceTemplate?: string | null;
   subscriptionRoutingPreset?: RoutingPresetId;
+  /** R3-b - raw custom xray routing rules. */
+  subscriptionCustomRoutingRules?: Record<string, unknown>[] | null;
 }
 
 export interface UpdateSettingsInput {
@@ -1183,6 +1185,7 @@ export interface UpdateSettingsInput {
   subscriptionSupportUrl?: string | null;
   subscriptionAnnounceTemplate?: string | null;
   subscriptionRoutingPreset?: RoutingPresetId;
+  subscriptionCustomRoutingRules?: Record<string, unknown>[] | null;
 }
 
 /** Fetch public-flagged settings, no auth required. Used by LoginPage so

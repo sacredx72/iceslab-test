@@ -17,6 +17,8 @@ export interface SubscriptionSettings {
   announceTemplate: string | null;
   brandName: string | null;
   routingPreset: RoutingPresetId;
+  /** R3-b - raw custom xray routing rules, or null. Applied to xray/xkeen. */
+  customRoutingRules: Record<string, unknown>[] | null;
 }
 
 // B5 - in-process cache for the subscription settings. `/sub/:token` is hit on
@@ -57,6 +59,14 @@ export async function getSubscriptionSettings(): Promise<SubscriptionSettings> {
   // 'proxy-all' (legacy behaviour) so a hand-edited row can never break /sub.
   const routingRaw = map.get('subscriptionRoutingPreset');
 
+  // R3-b - custom xray routing rules. Must be an array of objects, else null
+  // so a hand-edited / malformed row can never break /sub.
+  const customRaw = map.get('subscriptionCustomRoutingRules');
+  const customRoutingRules =
+    Array.isArray(customRaw) && customRaw.every((r) => r !== null && typeof r === 'object')
+      ? (customRaw as Record<string, unknown>[])
+      : null;
+
   const value: SubscriptionSettings = {
     profileTitle: asString('subscriptionProfileTitle'),
     updateIntervalHours: asInt('subscriptionUpdateIntervalHours', 24),
@@ -64,6 +74,7 @@ export async function getSubscriptionSettings(): Promise<SubscriptionSettings> {
     announceTemplate: asString('subscriptionAnnounceTemplate'),
     brandName: asString('brandName'),
     routingPreset: isRoutingPresetId(routingRaw) ? routingRaw : 'proxy-all',
+    customRoutingRules,
   };
   settingsCache = { value, expiresAt: Date.now() + SETTINGS_CACHE_TTL_MS };
   return value;

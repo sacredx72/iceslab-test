@@ -56,6 +56,13 @@ export interface XrayJsonBuildOpts {
    * shared with the desktop xrayjson format.
    */
   forRouter?: boolean;
+  /**
+   * R3-b - raw custom xray routing rules (operator-authored), prepended ahead
+   * of the preset rules + catch-all so they take precedence. Each entry is a
+   * literal xray routing-rule object referencing the tags this builder emits
+   * (`direct`, `block`, or a proxy tag). Empty/undefined = none.
+   */
+  customRules?: Record<string, unknown>[];
 }
 
 const RU_SPLIT_RULES: ReadonlyArray<Record<string, unknown>> = [
@@ -223,6 +230,8 @@ export function buildXrayJson(
       domainStrategy: ruSplit ? 'IPIfNonMatch' : 'AsIs',
       ...(balancers ? { balancers } : {}),
       rules: [
+        // R3-b custom rules win over presets + catch-all.
+        ...(opts.customRules ?? []),
         ...(ruSplit ? RU_SPLIT_RULES : []),
         balancerActive
           ? { type: 'field', network: 'tcp,udp', balancerTag: 'balancer-auto' }

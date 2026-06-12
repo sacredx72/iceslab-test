@@ -459,11 +459,12 @@ export async function subscriptionRoutes(app: FastifyInstance): Promise<void> {
       // per-squad override, then the panel-wide setting. plain/json/wgconf
       // carry no routing section, so we skip the read there.
       let routingPreset: RoutingPresetId = 'proxy-all';
+      let customRoutingRules: Record<string, unknown>[] | undefined;
       if (format === 'clash' || format === 'singbox' || format === 'xrayjson' || format === 'xkeen') {
-        routingPreset =
-          query.routing ??
-          result.squadRoutingPreset ??
-          (await getSubscriptionSettings()).routingPreset;
+        const settings = await getSubscriptionSettings();
+        routingPreset = query.routing ?? result.squadRoutingPreset ?? settings.routingPreset;
+        // R3-b custom rules apply only to xray-routing formats (xray/xkeen).
+        customRoutingRules = settings.customRoutingRules ?? undefined;
       }
 
       switch (format) {
@@ -508,7 +509,7 @@ export async function subscriptionRoutes(app: FastifyInstance): Promise<void> {
               : undefined;
           return reply
             .type('application/json')
-            .send(buildXrayJson(filtered, { bundle: xjBundle, routingPreset }));
+            .send(buildXrayJson(filtered, { bundle: xjBundle, routingPreset, customRules: customRoutingRules }));
         }
         case 'xkeen': {
           // XKeen (xray-core on Keenetic routers): outbounds + routing +
@@ -525,7 +526,7 @@ export async function subscriptionRoutes(app: FastifyInstance): Promise<void> {
               'Content-Disposition',
               `attachment; filename="${sanitizeFilename(result.json.user.username)}-xkeen.json"`,
             )
-            .send(buildXrayJson(filtered, { bundle: xkBundle, routingPreset, forRouter: true }));
+            .send(buildXrayJson(filtered, { bundle: xkBundle, routingPreset, forRouter: true, customRules: customRoutingRules }));
         }
         case 'outline':
           // SIP008 Shadowsocks online-config (Outline / shadowsocks-* clients).

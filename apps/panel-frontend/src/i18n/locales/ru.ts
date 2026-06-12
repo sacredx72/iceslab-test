@@ -595,6 +595,14 @@ export default {
       routingRuSplitDesc:
         'Реклама и малварь в блок, российские сайты и локальные адреса напрямую, остальное через туннель.',
       routingSaved: 'Пресет маршрутизации обновлён',
+      customRulesTitle: 'Кастомные правила маршрутизации (про)',
+      customRulesDesc:
+        'Сырые Xray routing-правила, применяются к форматам Xray JSON и XKeen ПЕРЕД пресетом. Для профи - оставь пустым, чтобы работал только пресет выше.',
+      customRulesLabel: 'Правила (JSON-массив)',
+      customRulesHint:
+        'JSON-массив Xray routing-rule объектов. Ссылайся на теги direct / block или прокси-тег. Имеют приоритет над пресетом.',
+      customRulesInvalidJson: 'Невалидный JSON',
+      customRulesNotArray: 'Должен быть JSON-массив объектов-правил',
     },
   },
   regions: {

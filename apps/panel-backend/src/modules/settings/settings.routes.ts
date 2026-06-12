@@ -44,6 +44,13 @@ const UpsertInput = z.object({
   subscriptionSupportUrl: z.string().url().max(255).nullable().optional(),
   subscriptionAnnounceTemplate: z.string().max(512).nullable().optional(),
   subscriptionRoutingPreset: z.enum(ROUTING_PRESET_IDS).optional(),
+  // R3-b - raw custom xray routing rules (array of rule objects), or null to
+  // clear. Applied to xray/xkeen subscription output ahead of the preset.
+  subscriptionCustomRoutingRules: z
+    .array(z.record(z.string(), z.unknown()))
+    .max(50)
+    .nullable()
+    .optional(),
 });
 
 export async function settingsRoutes(app: FastifyInstance): Promise<void> {

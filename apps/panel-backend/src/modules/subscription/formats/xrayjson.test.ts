@@ -216,4 +216,21 @@ describe('buildXrayJson', () => {
       expect(cfg.inbounds).toHaveLength(1);
     });
   });
+
+  // R3-b - raw custom routing rules.
+  describe('customRules (R3-b)', () => {
+    it('prepends custom rules ahead of preset rules and the catch-all', () => {
+      const custom = [{ type: 'field', domain: ['my.corp'], outboundTag: 'direct' }];
+      const cfg = parse(buildXrayJson([xrayEp], { customRules: custom, routingPreset: 'ru-split' }));
+      const rules = cfg.routing.rules;
+      expect(rules[0]).toEqual(custom[0]); // custom rule wins (first)
+      expect(rules[rules.length - 1].outboundTag).toBe('eu-1-xray'); // catch-all stays last
+      // the ru-split block still sits between custom and catch-all
+      expect(JSON.stringify(rules)).toContain('geosite:category-ru');
+    });
+
+    it('empty / absent custom rules keep output byte-identical', () => {
+      expect(buildXrayJson([xrayEp], { customRules: [] })).toBe(buildXrayJson([xrayEp]));
+    });
+  });
 });

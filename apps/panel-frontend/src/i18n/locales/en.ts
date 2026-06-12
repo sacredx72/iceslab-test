@@ -590,6 +590,14 @@ export default {
       routingRuSplitDesc:
         'Ads and malware blocked, Russian sites and private ranges go direct, everything else through the tunnel.',
       routingSaved: 'Routing preset updated',
+      customRulesTitle: 'Custom routing rules (advanced)',
+      customRulesDesc:
+        'Raw Xray routing rules, applied to the Xray JSON and XKeen formats ahead of the preset. For power users - leave empty to use only the preset above.',
+      customRulesLabel: 'Rules (JSON array)',
+      customRulesHint:
+        'A JSON array of Xray routing-rule objects. Reference the tags direct / block or a proxy tag. They take precedence over the preset.',
+      customRulesInvalidJson: 'Invalid JSON',
+      customRulesNotArray: 'Must be a JSON array of rule objects',
     },
   },
   regions: {
