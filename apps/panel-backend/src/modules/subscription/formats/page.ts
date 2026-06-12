@@ -182,6 +182,14 @@ export function buildSubscriptionPage(data: SubscriptionPageData): string {
     ...(hasXray ? [{ label: 'XKeen', fmt: 'xkeen' }] : []),
     // Outline / SIP008 is Shadowsocks-only.
     ...(hasSs ? [{ label: 'Outline', fmt: 'outline' }] : []),
+    // iOS proxy-line formats - shown when there's any proxy endpoint to carry.
+    ...(hasXray || hasSs
+      ? [
+          { label: 'Surge', fmt: 'surge' },
+          { label: 'Quantumult X', fmt: 'quantumultx' },
+          { label: 'Loon', fmt: 'loon' },
+        ]
+      : []),
     { label: 'Base64', fmt: 'plain' },
   ];
 

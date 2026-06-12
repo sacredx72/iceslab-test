@@ -41,6 +41,9 @@ const FORMAT_COLORS: Record<string, string> = {
   xrayjson: 'violet',
   xkeen: 'grape',
   outline: 'cyan',
+  surge: 'orange',
+  quantumultx: 'pink',
+  loon: 'indigo',
 };
 
 export function SrrPage() {

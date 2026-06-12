@@ -9,6 +9,9 @@ export const SrrFormat = z.enum([
   'xrayjson',
   'xkeen',
   'outline',
+  'surge',
+  'quantumultx',
+  'loon',
 ]);
 
 /**

@@ -8,6 +8,9 @@ import { buildSingboxJson } from './formats/singbox.js';
 import { buildWgQuickConf } from './formats/wgconf.js';
 import { buildXrayJson } from './formats/xrayjson.js';
 import { buildOutlineJson } from './formats/outline.js';
+import { buildSurgeConf } from './formats/surge.js';
+import { buildQuantumultXConf } from './formats/quantumultx.js';
+import { buildLoonConf } from './formats/loon.js';
 import { buildSubscriptionPage } from './formats/page.js';
 import QRCode from 'qrcode-svg';
 import { matchFormatForUserAgent } from '../srr/srr.service.js';
@@ -27,7 +30,10 @@ const TokenParamSchema = z.object({
   token: z.string().min(8).max(128),
 });
 
-const FormatEnum = z.enum(['plain', 'json', 'clash', 'singbox', 'wgconf', 'xrayjson', 'xkeen', 'outline']);
+const FormatEnum = z.enum([
+  'plain', 'json', 'clash', 'singbox', 'wgconf', 'xrayjson', 'xkeen', 'outline',
+  'surge', 'quantumultx', 'loon',
+]);
 type Format = z.infer<typeof FormatEnum>;
 
 const QuerySchema = z.object({
@@ -527,6 +533,16 @@ export async function subscriptionRoutes(app: FastifyInstance): Promise<void> {
           return reply
             .type('application/json')
             .send(buildOutlineJson(filtered));
+        case 'surge':
+          // Surge [Proxy] lines. ss/vmess/trojan/hy2; no vless/REALITY.
+          return reply.type('text/plain; charset=utf-8').send(buildSurgeConf(filtered));
+        case 'quantumultx':
+          // Quantumult X server_local lines. ss/vmess/vless/trojan incl REALITY.
+          return reply.type('text/plain; charset=utf-8').send(buildQuantumultXConf(filtered));
+        case 'loon':
+          // Loon proxy lines (best-effort; verify import in-app). ss/vmess/vless/
+          // trojan/hy2 incl REALITY.
+          return reply.type('text/plain; charset=utf-8').send(buildLoonConf(filtered));
         case 'plain':
         default:
           return reply

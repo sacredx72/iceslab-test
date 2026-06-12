@@ -60,6 +60,9 @@ const FORMAT_OPTIONS = [
   { value: 'xrayjson', label: 'Xray JSON' },
   { value: 'xkeen', label: 'XKeen (router)' },
   { value: 'outline', label: 'Outline (SIP008)' },
+  { value: 'surge', label: 'Surge' },
+  { value: 'quantumultx', label: 'Quantumult X' },
+  { value: 'loon', label: 'Loon' },
   { value: 'wgconf', label: 'wg-quick' },
   { value: 'mieru-json', label: 'Mieru JSON' },
 ];

@@ -409,7 +409,9 @@ export async function deleteNode(id: string): Promise<void> {
 
 // ───── Subscription Response Rules (SRR) ─────
 
-export type SubscriptionFormat = 'plain' | 'json' | 'clash' | 'singbox' | 'wgconf' | 'xrayjson' | 'xkeen' | 'outline';
+export type SubscriptionFormat =
+  | 'plain' | 'json' | 'clash' | 'singbox' | 'wgconf' | 'xrayjson' | 'xkeen'
+  | 'outline' | 'surge' | 'quantumultx' | 'loon';
 
 export interface SrrRule {
   id: string;
