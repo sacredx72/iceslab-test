@@ -628,6 +628,8 @@ export interface Squad {
   profileIds: string[];
   /** R3-a, per-squad routing-preset override; null = inherit panel default. */
   routingPreset: RoutingPresetId | null;
+  /** K7, per-squad HWID device-limit default; null = none. */
+  hwidDeviceLimit: number | null;
   memberCount: number;
   createdAt: string;
   updatedAt: string;
@@ -637,6 +639,7 @@ export interface CreateSquadInput {
   name: string;
   description?: string | null;
   routingPreset?: RoutingPresetId | null;
+  hwidDeviceLimit?: number | null;
   profileIds?: string[];
 }
 
@@ -644,6 +647,7 @@ export interface UpdateSquadInput {
   name?: string;
   description?: string | null;
   routingPreset?: RoutingPresetId | null;
+  hwidDeviceLimit?: number | null;
   /** Replaces the full profile set when provided. */
   profileIds?: string[];
 }

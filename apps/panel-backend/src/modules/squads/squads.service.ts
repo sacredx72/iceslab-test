@@ -66,6 +66,7 @@ export async function createSquad(input: CreateSquadInput): Promise<PublicSquadD
       name: input.name,
       description: input.description ?? null,
       routingPreset: input.routingPreset ?? null,
+      hwidDeviceLimit: input.hwidDeviceLimit ?? null,
       groupProfiles: {
         create: input.profileIds.map((profileId) => ({ profileId })),
       },
@@ -111,6 +112,7 @@ export async function updateSquad(
         ...(input.name !== undefined ? { name: input.name } : {}),
         ...(input.description !== undefined ? { description: input.description } : {}),
         ...(input.routingPreset !== undefined ? { routingPreset: input.routingPreset } : {}),
+        ...(input.hwidDeviceLimit !== undefined ? { hwidDeviceLimit: input.hwidDeviceLimit } : {}),
       },
       include: includeRelations,
     });

@@ -8,6 +8,8 @@ export interface PublicSquadDto {
   profileIds: string[];
   /** R3-a — per-squad routing-preset override, or null to inherit the panel default. */
   routingPreset: string | null;
+  /** K7 — per-squad HWID device-limit default (applies when user has no explicit limit). */
+  hwidDeviceLimit: number | null;
   memberCount: number;
   createdAt: string;
   updatedAt: string;
@@ -25,6 +27,7 @@ export function mapSquadToPublic(squad: SquadWithRelations): PublicSquadDto {
     description: squad.description,
     profileIds: squad.groupProfiles.map((gp) => gp.profileId),
     routingPreset: squad.routingPreset,
+    hwidDeviceLimit: squad.hwidDeviceLimit,
     memberCount: squad._count?.members ?? 0,
     createdAt: squad.createdAt.toISOString(),
     updatedAt: squad.updatedAt.toISOString(),

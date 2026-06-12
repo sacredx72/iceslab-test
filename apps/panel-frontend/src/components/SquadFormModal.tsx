@@ -10,6 +10,7 @@ import {
   Divider,
   Group,
   Modal,
+  NumberInput,
   Paper,
   ScrollArea,
   Select,
@@ -54,6 +55,8 @@ interface FormValues {
   description: string;
   // R3-a - '' = inherit the panel-wide routing preset.
   routingPreset: string;
+  // K7 - '' = no squad HWID default.
+  hwidDeviceLimit: number | '';
   profileIds: string[];
 }
 
@@ -62,6 +65,7 @@ function defaultValues(squad: Squad | null): FormValues {
     name: squad?.name ?? '',
     description: squad?.description ?? '',
     routingPreset: squad?.routingPreset ?? '',
+    hwidDeviceLimit: squad?.hwidDeviceLimit ?? '',
     profileIds: squad?.profileIds ?? [],
   };
 }
@@ -138,6 +142,7 @@ export function SquadFormModal({
       name: values.name,
       description: values.description.trim() || null,
       routingPreset: (values.routingPreset as RoutingPresetId) || null,
+      hwidDeviceLimit: values.hwidDeviceLimit === '' ? null : Number(values.hwidDeviceLimit),
       profileIds: values.profileIds,
     };
     if (isEdit) {
@@ -312,6 +317,19 @@ export function SquadFormModal({
             ]}
             allowDeselect={false}
             {...form.getInputProps('routingPreset')}
+          />
+          {/* K7 - per-squad HWID device-limit default (used when a user has no
+              explicit limit; max across the user's squads wins). */}
+          <NumberInput
+            label={t('squads.form.hwidLimit')}
+            description={t('squads.form.hwidLimitDesc')}
+            placeholder={t('squads.form.hwidLimitPlaceholder')}
+            min={1}
+            max={100}
+            allowDecimal={false}
+            allowNegative={false}
+            disabled={isAllSquad}
+            {...form.getInputProps('hwidDeviceLimit')}
           />
 
           <Divider

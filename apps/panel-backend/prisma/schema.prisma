@@ -329,6 +329,10 @@ model Group {
   // inherit the panel-wide default. A user's effective preset is the single
   // distinct non-null override across their squads (see subscription.service).
   routingPreset String? @map("routing_preset") @db.VarChar(32)
+  // K7 - optional per-squad HWID device-limit default. Used only when the user
+  // has no explicit hwidDeviceLimit; the effective default is the MAX across
+  // the user's squads (most-permissive cohort wins). Null = no squad default.
+  hwidDeviceLimit Int? @map("hwid_device_limit")
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 

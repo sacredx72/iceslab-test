@@ -101,6 +101,17 @@ export async function enforceHwid(
 }
 
 /**
+ * K7 - reduce a user's per-squad HWID device-limit defaults to one effective
+ * default. The MAX across the squads' positive values wins (most-permissive
+ * cohort grants the device count); null when no squad sets one. Used only when
+ * the user has no explicit hwidDeviceLimit. Pure (no DB) for testing.
+ */
+export function resolveSquadHwidLimit(squadDefaults: (number | null)[]): number | null {
+  const vals = squadDefaults.filter((n): n is number => typeof n === 'number' && n > 0);
+  return vals.length > 0 ? Math.max(...vals) : null;
+}
+
+/**
  * Admin-facing: list all devices currently registered for a user. Sorted
  * newest-first so the recently-added entry sits on top of the UI list.
  */
