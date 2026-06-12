@@ -10,6 +10,7 @@ import {
 import { pollNodeStatuses, pollNodeMetrics } from '../nodes/nodes.cron.js';
 import { pollNodeStats } from '../stats/stats.cron.js';
 import { pruneHistory } from '../maintenance/retention.cron.js';
+import { getLogger } from '../../lib/logger.js';
 
 // ───── Queue ─────
 
@@ -59,7 +60,7 @@ export async function registerCronJobs(): Promise<void> {
       },
     );
   }
-  console.log(`[scheduler] registered ${CRON_JOBS.length} cron jobs`);
+  getLogger().info(`[scheduler] registered ${CRON_JOBS.length} cron jobs`);
 }
 
 // ───── Worker ─────
@@ -71,32 +72,32 @@ export function startCronTasksWorker(): Worker {
       switch (job.name) {
         case 'reset-traffic-daily': {
           const n = await resetTrafficForStrategy('day');
-          if (n > 0) console.log(`[cron] reset-traffic-daily — reset ${n} users`);
+          if (n > 0) getLogger().info(`[cron] reset-traffic-daily — reset ${n} users`);
           break;
         }
         case 'reset-traffic-weekly': {
           const n = await resetTrafficForStrategy('week');
-          if (n > 0) console.log(`[cron] reset-traffic-weekly — reset ${n} users`);
+          if (n > 0) getLogger().info(`[cron] reset-traffic-weekly — reset ${n} users`);
           break;
         }
         case 'reset-traffic-monthly': {
           const n = await resetTrafficForStrategy('month');
-          if (n > 0) console.log(`[cron] reset-traffic-monthly — reset ${n} users`);
+          if (n > 0) getLogger().info(`[cron] reset-traffic-monthly — reset ${n} users`);
           break;
         }
         case 'reset-traffic-monthly-rolling': {
           const n = await resetTrafficRolling();
-          if (n > 0) console.log(`[cron] reset-traffic-monthly-rolling — reset ${n} users`);
+          if (n > 0) getLogger().info(`[cron] reset-traffic-monthly-rolling — reset ${n} users`);
           break;
         }
         case 'review-find-expired': {
           const n = await findExpiredUsers();
-          if (n > 0) console.log(`[cron] review-find-expired — flipped ${n} users → expired`);
+          if (n > 0) getLogger().info(`[cron] review-find-expired — flipped ${n} users → expired`);
           break;
         }
         case 'review-find-exceeded-traffic': {
           const n = await findExceededTrafficUsers();
-          if (n > 0) console.log(`[cron] review-find-exceeded-traffic — flipped ${n} users → limited`);
+          if (n > 0) getLogger().info(`[cron] review-find-exceeded-traffic — flipped ${n} users → limited`);
           break;
         }
         case 'node-healthcheck-poll': {
@@ -104,34 +105,34 @@ export function startCronTasksWorker(): Worker {
           // Only log when something is actually unhealthy — quiet ticks keep
           // the journal readable. ok-counts don't matter unless you graph them.
           if (down > 0) {
-            console.log(`[cron] node-healthcheck-poll — ${ok} online, ${down} unreachable`);
+            getLogger().info(`[cron] node-healthcheck-poll — ${ok} online, ${down} unreachable`);
           }
           break;
         }
         case 'node-metrics-poll': {
           const { failed } = await pollNodeMetrics();
           if (failed > 0) {
-            console.log(`[cron] node-metrics-poll — ${failed} nodes failed to report metrics`);
+            getLogger().info(`[cron] node-metrics-poll — ${failed} nodes failed to report metrics`);
           }
           break;
         }
         case 'node-stats-poll': {
           const { failed } = await pollNodeStats();
           if (failed > 0) {
-            console.log(`[cron] node-stats-poll — ${failed} nodes failed`);
+            getLogger().info(`[cron] node-stats-poll — ${failed} nodes failed`);
           }
           break;
         }
         case 'reconcile-orphan-users': {
           const n = await reconcileOrphanNodeUsers();
-          if (n > 0) console.log(`[cron] reconcile-orphan-users — re-queued removeUser for ${n} users`);
+          if (n > 0) getLogger().info(`[cron] reconcile-orphan-users — re-queued removeUser for ${n} users`);
           break;
         }
         case 'prune-history': {
           const r = await pruneHistory();
           const total = r.subscriptionRequests + r.nodeUserUsage + r.nodeUsage;
           if (total > 0) {
-            console.log(
+            getLogger().info(
               `[cron] prune-history — deleted ${r.subscriptionRequests} sub-req, ${r.nodeUserUsage} user-usage, ${r.nodeUsage} node-usage rows`,
             );
           }

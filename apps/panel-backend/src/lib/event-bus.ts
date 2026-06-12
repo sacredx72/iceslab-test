@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { getLogger } from './logger.js';
 
 /**
  * All domain events in the panel.
@@ -61,7 +62,7 @@ class DomainEventBus {
       void Promise.resolve()
         .then(() => handler(payload))
         .catch((err: unknown) => {
-          console.error(`[event-bus] handler for "${String(event)}" threw`, err);
+          getLogger().error({ err }, `[event-bus] handler for "${String(event)}" threw`);
         });
     });
   }

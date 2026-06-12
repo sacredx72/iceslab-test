@@ -4,6 +4,7 @@ import { redis } from '../../lib/redis.js';
 import { NodeTransport, NodeRequestError } from './nodes.transport.js';
 import { inboundSyncQueue } from '../inbounds/inbounds.queue.js';
 import { notifyTelegramAsync, escapeMarkdown } from '../../lib/telegram-notify.js';
+import { getLogger } from '../../lib/logger.js';
 
 const METRICS_KEY_PREFIX = 'node:metrics:';
 const METRICS_TTL_SECONDS = 60;
@@ -87,7 +88,7 @@ export async function pollNodeStatuses(): Promise<{ ok: number; down: number }> 
             { jobId: `apply-${node.id}` },
           )
           .catch((err: unknown) => {
-            console.error(`[cron] re-enqueue applyInbounds for ${node.name} failed:`, err);
+            getLogger().error({ err }, `[cron] re-enqueue applyInbounds for ${node.name} failed`);
           });
       }
       // Slice 32 — admin alerts on node status flips. Skip the initial

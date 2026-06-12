@@ -3,6 +3,7 @@ import type { AddUserRequest, RemoveUserRequest } from '@iceslab/shared';
 import { redis } from '../../lib/redis.js';
 import { prisma } from '../../prisma.js';
 import { NodeTransport, NodeRequestError } from '../nodes/nodes.transport.js';
+import { getLogger } from '../../lib/logger.js';
 
 // ───── Job data shapes ─────
 
@@ -62,13 +63,13 @@ async function fanOut<T>(
   label: string,
 ): Promise<void> {
   if (nodes.length === 0) {
-    console.log(`[worker:node-users] ${label} — no active nodes, skipping`);
+    getLogger().info(`[worker:node-users] ${label} — no active nodes, skipping`);
     return;
   }
   const results = await Promise.allSettled(
     nodes.map(async (node) => {
       await call(node);
-      console.log(`[worker:node-users] ${label} → ${node.name} ok`);
+      getLogger().info(`[worker:node-users] ${label} → ${node.name} ok`);
     }),
   );
   const failures = results.flatMap((r, i) =>
@@ -79,7 +80,7 @@ async function fanOut<T>(
       f.reason instanceof NodeRequestError
         ? `${f.reason.status} ${f.reason.message}`
         : String(f.reason);
-    console.log(`[worker:node-users] ${label} → ${f.node.name} FAILED: ${detail}`);
+    getLogger().info(`[worker:node-users] ${label} → ${f.node.name} FAILED: ${detail}`);
   }
   if (failures.length > 0) {
     throw new AggregateError(
@@ -103,7 +104,7 @@ async function syncAddUser(userId: string): Promise<void> {
     },
   });
   if (!user) {
-    console.log(`[worker:node-users] addUser ${userId} — user not found, skipping`);
+    getLogger().info(`[worker:node-users] addUser ${userId} — user not found, skipping`);
     return;
   }
 
@@ -150,7 +151,7 @@ async function syncBackfillNode(nodeId: string): Promise<void> {
     select: { id: true, name: true, address: true },
   });
   if (!node) {
-    console.log(`[worker:node-users] backfillNode ${nodeId} — node not active, skipping`);
+    getLogger().info(`[worker:node-users] backfillNode ${nodeId} — node not active, skipping`);
     return;
   }
 
@@ -178,11 +179,11 @@ async function syncBackfillNode(nodeId: string): Promise<void> {
   });
 
   if (users.length === 0) {
-    console.log(`[worker:node-users] backfillNode ${node.name} — no active users, skipping`);
+    getLogger().info(`[worker:node-users] backfillNode ${node.name} — no active users, skipping`);
     return;
   }
 
-  console.log(`[worker:node-users] backfillNode ${node.name} — pushing ${users.length} user(s)`);
+  getLogger().info(`[worker:node-users] backfillNode ${node.name} — pushing ${users.length} user(s)`);
 
   const transport = new NodeTransport(node);
   const results = await Promise.allSettled(
@@ -211,7 +212,7 @@ async function syncBackfillNode(nodeId: string): Promise<void> {
       f.reason instanceof NodeRequestError
         ? `${f.reason.status} ${f.reason.message}`
         : String(f.reason);
-    console.log(
+    getLogger().info(
       `[worker:node-users] backfillNode ${node.name} → ${f.user.username} FAILED: ${detail}`,
     );
   }
@@ -221,7 +222,7 @@ async function syncBackfillNode(nodeId: string): Promise<void> {
       `${failures.length}/${users.length} users failed to backfill onto ${node.name}`,
     );
   }
-  console.log(`[worker:node-users] backfillNode ${node.name} — ${users.length} user(s) ok`);
+  getLogger().info(`[worker:node-users] backfillNode ${node.name} — ${users.length} user(s) ok`);
 }
 
 // ───── Worker ─────

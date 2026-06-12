@@ -6,6 +6,7 @@ import { mtprotoSecret } from '../../core-adapters/mtproto/index.js';
 import { NodeTransport, NodeRequestError } from '../nodes/nodes.transport.js';
 import { inboundSyncJobs } from '../../lib/metrics.js';
 import { allocatePeer } from '../amneziawg/amneziawg.service.js';
+import { getLogger } from '../../lib/logger.js';
 
 // ───── Job data shapes ─────
 
@@ -56,7 +57,7 @@ export const inboundSyncQueue = new Queue<ApplyNodeInboundsJobData>(QUEUE_NAME, 
     // rebuilds, network blips, mTLS hiccups during cert rotation).
     //
     // Fix: drop failed jobs immediately. Operators see retries via the
-    // `[worker:inbound-sync] applyInbounds X FAILED: ...` console.log
+    // `[worker:inbound-sync] applyInbounds X FAILED: ...` getLogger().info
     // before the final retry; long-term failures will re-enqueue on the
     // next event (binding/profile change), which is the right behaviour.
     removeOnFail: true,
@@ -184,14 +185,14 @@ export async function applyInboundsForNode(nodeId: string): Promise<void> {
 
   const node = await fetchNode(nodeId);
   if (!node) {
-    console.log(`[worker:inbound-sync] applyInbounds ${nodeId} — node not active, skipping`);
+    getLogger().info(`[worker:inbound-sync] applyInbounds ${nodeId} — node not active, skipping`);
     return;
   }
 
   const inbounds = await fetchEnabledInbounds(nodeId);
   const req: ApplyInboundsRequest = { inbounds };
 
-  console.log(
+  getLogger().info(
     `[worker:inbound-sync] applyInbounds ${node.name} — pushing ${inbounds.length} inbound(s)`,
   );
 
@@ -199,7 +200,7 @@ export async function applyInboundsForNode(nodeId: string): Promise<void> {
 
   try {
     const res = await transport.applyInbounds(req);
-    console.log(
+    getLogger().info(
       `[worker:inbound-sync] applyInbounds ${node.name} ok — applied=${res.applied} skipped=${res.skipped}`,
     );
     inboundSyncJobs.inc({ result: 'ok' });
@@ -210,7 +211,7 @@ export async function applyInboundsForNode(nodeId: string): Promise<void> {
         : err instanceof Error
         ? err.message
         : String(err);
-    console.log(`[worker:inbound-sync] applyInbounds ${node.name} FAILED: ${detail}`);
+    getLogger().info(`[worker:inbound-sync] applyInbounds ${node.name} FAILED: ${detail}`);
     inboundSyncJobs.inc({ result: 'fail' });
     throw err;
   }
@@ -246,7 +247,7 @@ export async function applyInboundsForNode(nodeId: string): Promise<void> {
   }
 
   const users = await fetchActiveUsers();
-  console.log(
+  getLogger().info(
     `[worker:inbound-sync] pushing ${users.length} user(s) to ${node.name}`,
   );
 
@@ -264,7 +265,7 @@ export async function applyInboundsForNode(nodeId: string): Promise<void> {
         awgIpByUser.set(u.id, peer.ip);
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
-        console.log(
+        getLogger().info(
           `[worker:inbound-sync] allocatePeer ${u.username} on profile ${awgProfileId} FAILED: ${detail}`,
         );
         // Fall through — addUser will silently skip the AWG portion on the
@@ -302,13 +303,13 @@ export async function applyInboundsForNode(nodeId: string): Promise<void> {
       if (r.status === 'rejected') {
         chunkFailed++;
         const detail = r.reason instanceof Error ? r.reason.message : String(r.reason);
-        console.log(
+        getLogger().info(
           `[worker:inbound-sync] addUser ${chunk[j]!.username} to ${node.name} FAILED: ${detail}`,
         );
       }
     }
   }
-  console.log(
+  getLogger().info(
     `[worker:inbound-sync] user sync to ${node.name} done (${users.length - chunkFailed}/${users.length} ok)`,
   );
 
