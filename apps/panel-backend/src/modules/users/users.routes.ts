@@ -14,6 +14,53 @@ import {
   SubscriptionNotFoundError,
 } from '../subscription/subscription.service.js';
 
+// B12-tail - response schema for the paginated users list (Users page keeps it
+// warm via placeholderData). Compiles a fast-json-stringify serializer over the
+// declared PublicUserDto primitives; every object is additionalProperties:true
+// so nothing is ever stripped and undeclared fields pass through unchanged.
+const nstr = { type: ['string', 'null'] } as const;
+const nnum = { type: ['number', 'null'] } as const;
+const usersListResponseSchema = {
+  type: 'object',
+  additionalProperties: true,
+  properties: {
+    users: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: true,
+        properties: {
+          id: { type: 'string' },
+          shortId: { type: 'string' },
+          username: { type: 'string' },
+          status: { type: 'string' },
+          expireAt: nstr,
+          trafficLimitBytes: nnum,
+          trafficUsedBytes: { type: 'number' },
+          lifetimeTrafficBytes: { type: 'number' },
+          trafficLimitStrategy: { type: 'string' },
+          lastTrafficResetAt: nstr,
+          lastOnlineAt: nstr,
+          subscriptionToken: { type: 'string' },
+          subRevokedAt: nstr,
+          hwidDeviceLimit: nnum,
+          description: nstr,
+          tag: nstr,
+          telegramId: nstr,
+          email: nstr,
+          enabledProtocols: { type: 'array', items: { type: 'string' } },
+          groupIds: { type: 'array', items: { type: 'string' } },
+          createdAt: { type: 'string' },
+          updatedAt: { type: 'string' },
+        },
+      },
+    },
+    total: { type: 'number' },
+    page: { type: 'number' },
+    limit: { type: 'number' },
+  },
+} as const;
+
 export async function usersRoutes(app: FastifyInstance): Promise<void> {
   // Wave-14 #15: per-route onRequest instead of plugin-level addHook so a
   // future public route added to this plugin doesn't silently inherit
@@ -35,11 +82,15 @@ export async function usersRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // GET /api/users
-  app.get('/api/users', auth, async (request, reply) => {
-    const query = ListUsersQuerySchema.parse(request.query);
-    const result = await usersService.listUsers(query);
-    return reply.send(result);
-  });
+  app.get(
+    '/api/users',
+    { onRequest: [requireAuth], schema: { response: { 200: usersListResponseSchema } } },
+    async (request, reply) => {
+      const query = ListUsersQuerySchema.parse(request.query);
+      const result = await usersService.listUsers(query);
+      return reply.send(result);
+    },
+  );
 
   // GET /api/users/:id
   app.get('/api/users/:id', auth, async (request, reply) => {
