@@ -247,6 +247,17 @@ model Node {
   regionId              String?   @map("region_id") @db.Uuid
   maxUsers              Int?      @map("max_users")
 
+  // B3 / G (2026-06-14) - self-steal domain + node hardening.
+  // domain: FQDN the operator A-records to THIS node's IP. Used as the REALITY
+  //   serverName for self-steal profiles deployed here (SNI resolves to the node
+  //   IP, so SNI and IP stay consistent), and later for ACME on the node. NULL
+  //   means no self-steal / no ACME.
+  // hardening: flexible blob of probe-resistance toggles (ufwLockdown, fail2ban,
+  //   realisticFallback, sshAllowlist, ...). Json so new G-toggles add without a
+  //   migration; the install script + agent read only the flags they understand.
+  domain                String?   @db.VarChar(255)
+  hardening             Json?
+
   // Slice 38 — heartbeat self-destruct. Random 32-byte secret, generated
   // at node creation. The bootstrap payload bundles a stateless HMAC token
   // (nodeId + sig over heartbeatSecret) that the agent presents on every
