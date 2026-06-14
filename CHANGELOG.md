@@ -84,6 +84,12 @@ reliability audit across both the panel and the node-agent.
 - **Per-user stats no longer error on multi-inbound users.** A user present on
   more than one inbound of a node tripped a Postgres conflict (21000); per-user
   rows are aggregated before the bulk upsert.
+- **Node firewall self-heals on boot.** UFW was only opened for an inbound's port
+  inside the applyInbounds push handler, so a node that restarted (or whose rule
+  was lost to a reimage, or to a transient `ufw allow` that has no retry) could
+  run its core with the port closed until the next push. The agent now re-ensures
+  UFW for every persisted inbound on startup. Caught live: xray reachable from
+  abroad but the binding port was firewalled.
 - **Smaller audit fixes.** IPv6-aware subscription host parsing, a human-readable
   port-conflict 409 naming the node and profile, an online-aware node status dot,
   a flag-emoji guard for non-ISO country codes, a bounded Hysteria auth-callback
