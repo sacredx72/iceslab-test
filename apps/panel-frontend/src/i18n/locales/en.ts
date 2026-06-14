@@ -126,6 +126,8 @@ export default {
       countryDesc: 'ISO 3166-1 for GeoIP',
       multiplier: 'Consumption multiplier',
       multiplierDesc: '1 = normal, > 1 premium',
+      domain: 'Domain (FQDN, optional)',
+      domainDesc: 'A-record this to the node IP. Used as REALITY serverName for self-steal profiles (SNI matches IP, survives RU DPI) and for ACME later.',
       profilesAlert:
         'Pick profiles to deploy on this node. Bindings will be created automatically.',
       compatibleGroup: 'Compatible with protocol',

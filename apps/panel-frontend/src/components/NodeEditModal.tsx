@@ -94,6 +94,8 @@ interface FormValues {
   // Slice 27.5 - region grouping + capacity hint.
   regionId: string;
   maxUsers: number | '';
+  // B3/G - public FQDN for REALITY self-steal serverName + future ACME.
+  domain: string;
 }
 
 function splitAddress(address: string): { host: string; port: number } {
@@ -141,6 +143,7 @@ export function NodeEditModal({
       consumptionMultiplier: node ? Number(node.consumptionMultiplier) : 1,
       regionId: node?.regionId ?? '',
       maxUsers: node?.maxUsers ?? '',
+      domain: node?.domain ?? '',
     },
   });
 
@@ -156,6 +159,7 @@ export function NodeEditModal({
         consumptionMultiplier: Number(node.consumptionMultiplier),
         regionId: node.regionId ?? '',
         maxUsers: node.maxUsers ?? '',
+        domain: node.domain ?? '',
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -333,6 +337,7 @@ export function NodeEditModal({
       regionId: form.values.regionId || null,
       maxUsers:
         form.values.maxUsers === '' ? null : Number(form.values.maxUsers),
+      domain: form.values.domain.trim() || null,
     });
   }
 
@@ -542,6 +547,12 @@ export function NodeEditModal({
                   {...form.getInputProps('maxUsers')}
                 />
               </Group>
+              <TextInput
+                label={t('nodes.form.domain')}
+                description={t('nodes.form.domainDesc')}
+                placeholder="des-01.example.com"
+                {...form.getInputProps('domain')}
+              />
             </Stack>
           </Card>
 

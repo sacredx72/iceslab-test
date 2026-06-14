@@ -72,6 +72,9 @@ interface FormValues {
   protocol: NodeProtocol;
   countryCode: string;
   consumptionMultiplier: number | '';
+  // B3/G - public FQDN of THIS node (A-record to its IP). Used as the REALITY
+  // serverName for self-steal profiles deployed here. Empty = no self-steal/ACME.
+  domain: string;
 }
 
 /** Split a stored `address` into host + port. Empty port → DEFAULT_NODE_PORT. */
@@ -98,6 +101,7 @@ function defaults(node: Node | null): FormValues {
     protocol: node?.protocol ?? 'xray',
     countryCode: node?.countryCode ?? '',
     consumptionMultiplier: node ? Number(node.consumptionMultiplier) : 1,
+    domain: node?.domain ?? '',
   };
 }
 
@@ -207,6 +211,7 @@ export function NodeFormModal({ opened, onClose, node, onSubmit, loading }: Prop
       countryCode: values.countryCode || null,
       consumptionMultiplier:
         values.consumptionMultiplier === '' ? 1 : Number(values.consumptionMultiplier),
+      domain: values.domain.trim() || null,
     };
     if (isEdit) {
       await onSubmit(base satisfies UpdateNodeInput, selectedProfileIds);
@@ -363,6 +368,12 @@ export function NodeFormModal({ opened, onClose, node, onSubmit, loading }: Prop
                 {...form.getInputProps('consumptionMultiplier')}
               />
             </Group>
+            <TextInput
+              label={t('nodes.form.domain')}
+              description={t('nodes.form.domainDesc')}
+              placeholder="des-01.example.com"
+              {...form.getInputProps('domain')}
+            />
             <Group justify="space-between" mt="md">
               <Text
                 style={{

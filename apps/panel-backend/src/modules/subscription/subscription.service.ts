@@ -213,6 +213,9 @@ export async function generateSubscription(
                   id: true,
                   name: true,
                   address: true,
+                  // B3/G - node FQDN, used as the REALITY serverName/SNI for
+                  // self-steal xray endpoints (per-node, must resolve to node IP).
+                  domain: true,
                   createdAt: true,
                   // Slice 28 — region.code drives the "same-region bonus" in the
                   // smart-selection ranker. Null when admin hasn't tagged a region;
@@ -364,9 +367,17 @@ export async function generateSubscription(
       // null falls through to the profile-level config, so back-compat with
       // bindings that have only the auto-generated Default host stays exact.
       // For tls the SNI comes from the cert's serverName, not REALITY serverNames.
+      // B3/G - REALITY self-steal: the SNI must be the NODE's own domain (the same
+      // value the panel pushes as serverNames into the node config), so SNI and IP
+      // stay consistent and survive RU-DPI. A host sniOverride still wins if set.
+      const isSelfSteal = (cfg as { realityMode?: string }).realityMode === 'self-steal';
       const sni =
         hostOverrides?.sniOverride ??
-        (cfg.security === 'tls' ? cfg.tlsServerName : cfg.realityServerNames[0]) ??
+        (isSelfSteal
+          ? (b.node.domain ?? '')
+          : cfg.security === 'tls'
+            ? cfg.tlsServerName
+            : cfg.realityServerNames[0]) ??
         '';
       const shortId = cfg.realityShortIds[0] ?? '';
       const network = cfg.network ?? 'raw';

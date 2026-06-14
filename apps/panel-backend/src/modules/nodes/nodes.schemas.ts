@@ -18,6 +18,15 @@ const AddressSchema = z
 
 const CountryCodeSchema = z.string().length(2).regex(/^[A-Z]{2}$/);
 
+// B3/G - node FQDN for REALITY self-steal serverName (+ future ACME). Bare host,
+// no scheme, no port. A-record it to THIS node's IP so SNI and IP stay
+// consistent (the mismatch RU-DPI detects). Empty/null = no self-steal/ACME.
+const DomainSchema = z
+  .string()
+  .max(255)
+  .regex(/^[a-zA-Z0-9.-]+$/, 'Domain must be a bare FQDN (no scheme, no port)')
+  .nullish();
+
 // Slice 27 — keep parity with the inbound/profile protocol enum in
 // inbounds.schemas.ts. Node.protocol is a label for "which adapter is the
 // primary / installed on this VPS"; the actual deployment is per-binding.
@@ -40,6 +49,8 @@ export const CreateNodeSchema = z.object({
   // Slice 27.5
   regionId: z.uuid().nullable().optional(),
   maxUsers: z.number().int().positive().max(100000).nullable().optional(),
+  // B3/G
+  domain: DomainSchema,
 });
 export type CreateNodeInput = z.infer<typeof CreateNodeSchema>;
 
@@ -51,6 +62,7 @@ export const UpdateNodeSchema = z.object({
   consumptionMultiplier: z.number().int().positive().optional(),
   regionId: z.uuid().nullable().optional(),
   maxUsers: z.number().int().positive().max(100000).nullable().optional(),
+  domain: DomainSchema,
 });
 export type UpdateNodeInput = z.infer<typeof UpdateNodeSchema>;
 

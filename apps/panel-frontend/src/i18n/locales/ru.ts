@@ -130,6 +130,8 @@ export default {
       countryDesc: 'ISO 3166-1 для GeoIP',
       multiplier: 'Consumption multiplier',
       multiplierDesc: '1 = норма, > 1 премиум',
+      domain: 'Домен (FQDN, опционально)',
+      domainDesc: 'A-запись на IP ноды. Используется как REALITY serverName для self-steal профилей (SNI совпадает с IP, переживает РФ-DPI) и для ACME позже.',
       profilesAlert:
         'Отметь профили которые сразу развернуть на этой ноде. Bindings создадутся автоматически.',
       compatibleGroup: 'Совместимые с протоколом',

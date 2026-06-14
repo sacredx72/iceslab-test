@@ -170,6 +170,37 @@ async function fetchEnabledInbounds(nodeId: string): Promise<InboundDto[]> {
     };
   });
 
+  // B3/G - REALITY self-steal: serverNames is a per-NODE property (must resolve
+  // to THIS node's IP), not per-profile. For any xray inbound whose profile is in
+  // self-steal mode, override serverNames with the node's own domain so SNI and IP
+  // stay consistent (the node-agent serves a local TLS fallback for it; see
+  // selfsteal.go). One self-steal profile can deploy to N nodes, each using its
+  // own domain. If the node has no domain set, self-steal cannot work; surface it.
+  const selfStealInbounds = inbounds.filter(
+    (i) =>
+      i.protocol === 'xray' &&
+      (i.config as { realityMode?: string }).realityMode === 'self-steal',
+  );
+  if (selfStealInbounds.length > 0) {
+    const nodeRow = await prisma.node.findUnique({
+      where: { id: nodeId },
+      select: { domain: true },
+    });
+    const domain = nodeRow?.domain ?? null;
+    for (const ib of selfStealInbounds) {
+      if (domain) {
+        ib.config = {
+          ...(ib.config as Record<string, unknown>),
+          serverNames: [domain],
+        } as InboundDto['config'];
+      } else {
+        getLogger().info(
+          `[inbound-sync] node ${nodeId} xray inbound ${ib.id} is REALITY self-steal but the node has no domain set; serverNames not overridden (self-steal will not work until a domain is set on the node)`,
+        );
+      }
+    }
+  }
+
   // C3 - if this node is a hop in an enabled cascade, attach its chaining
   // fragments (link-in inbound, link-out outbound, routing rules) to the node's
   // xray inbound. The node-agent merges them into the xray config and forwards

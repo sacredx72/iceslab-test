@@ -299,6 +299,8 @@ export interface Node {
   // Slice 27.5
   regionId: string | null;
   maxUsers: number | null;
+  // B3/G - FQDN for REALITY self-steal serverName + future ACME.
+  domain: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -347,6 +349,7 @@ export interface CreateNodeInput {
   consumptionMultiplier?: number;
   regionId?: string | null;
   maxUsers?: number | null;
+  domain?: string | null;
 }
 
 export interface UpdateNodeInput {
@@ -357,6 +360,7 @@ export interface UpdateNodeInput {
   consumptionMultiplier?: number;
   regionId?: string | null;
   maxUsers?: number | null;
+  domain?: string | null;
 }
 
 export async function listNodes(params?: {

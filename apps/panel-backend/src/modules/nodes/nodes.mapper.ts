@@ -13,6 +13,8 @@ export interface PublicNodeDto {
   // Slice 27.5 — region grouping + capacity hint.
   regionId: string | null;
   maxUsers: number | null;
+  // B3/G — FQDN for REALITY self-steal serverName + future ACME.
+  domain: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -34,6 +36,7 @@ export function mapNodeToPublic(node: Node): PublicNodeDto {
     consumptionMultiplier: node.consumptionMultiplier.toString(),
     regionId: node.regionId,
     maxUsers: node.maxUsers,
+    domain: node.domain,
     createdAt: node.createdAt.toISOString(),
     updatedAt: node.updatedAt.toISOString(),
   };

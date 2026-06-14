@@ -69,6 +69,7 @@ export async function createNode(
       consumptionMultiplier: BigInt(input.consumptionMultiplier),
       regionId: input.regionId ?? null,
       maxUsers: input.maxUsers ?? null,
+      domain: input.domain ?? null,
       // Slice 38 — heartbeat-self-destruct secret. 32 bytes of entropy is
       // overkill for HMAC-SHA256 keying, but stays well under the 64-byte
       // block size and matches our convention for symmetric secrets.
@@ -220,6 +221,7 @@ export async function updateNode(id: string, input: UpdateNodeInput): Promise<Pu
   }
   if (input.regionId !== undefined) data.regionId = input.regionId;
   if (input.maxUsers !== undefined) data.maxUsers = input.maxUsers;
+  if (input.domain !== undefined) data.domain = input.domain;
 
   const updated = await repo.updateById(id, data);
   return mapNodeToPublic(updated);
