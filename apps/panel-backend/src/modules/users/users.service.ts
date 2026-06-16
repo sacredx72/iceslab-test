@@ -42,6 +42,15 @@ function toBigIntOrNull(value: number | string | null | undefined): bigint | nul
   return value != null ? BigInt(value) : null;
 }
 
+function isUniqueViolation(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    (err as { code?: string }).code === 'P2002'
+  );
+}
+
 // ───── Service methods ─────
 
 export async function createUser(input: CreateUserInput): Promise<PublicUserDto> {
@@ -52,40 +61,54 @@ export async function createUser(input: CreateUserInput): Promise<PublicUserDto>
 
   const creds = generateUserCredentials();
 
-  const user = await repo.create({
-    username: input.username,
-    shortId: creds.shortId,
-    subscriptionToken: creds.subscriptionToken,
+  let user;
+  try {
+    user = await repo.create({
+      username: input.username,
+      shortId: creds.shortId,
+      subscriptionToken: creds.subscriptionToken,
 
-    hysteriaPassword:    creds.hysteriaPassword,
-    naivePassword:       creds.naivePassword,
-    xrayUuid:            creds.xrayUuid,
-    amneziawgPrivateKey: creds.amneziawgPrivateKey,
-    amneziawgPublicKey:  creds.amneziawgPublicKey,
+      hysteriaPassword:    creds.hysteriaPassword,
+      naivePassword:       creds.naivePassword,
+      xrayUuid:            creds.xrayUuid,
+      amneziawgPrivateKey: creds.amneziawgPrivateKey,
+      amneziawgPublicKey:  creds.amneziawgPublicKey,
 
-    trafficLimitBytes:    gbToBytes(input.trafficLimitGb),
-    trafficLimitStrategy: input.trafficLimitStrategy,
-    expireAt:             daysFromNow(input.expireDays),
+      trafficLimitBytes:    gbToBytes(input.trafficLimitGb),
+      trafficLimitStrategy: input.trafficLimitStrategy,
+      expireAt:             daysFromNow(input.expireDays),
 
-    hwidDeviceLimit: input.hwidDeviceLimit ?? null,
-    description:     input.description ?? null,
-    tag:             input.tag ?? null,
-    telegramId:      toBigIntOrNull(input.telegramId),
-    email:           input.email ?? null,
+      hwidDeviceLimit: input.hwidDeviceLimit ?? null,
+      description:     input.description ?? null,
+      tag:             input.tag ?? null,
+      telegramId:      toBigIntOrNull(input.telegramId),
+      email:           input.email ?? null,
 
-    enabledProtocols: input.enabledProtocols,
+      enabledProtocols: input.enabledProtocols,
 
-    traffic: { create: {} },
-    groupMembers: {
-      // When admin doesn't pick any squads explicitly, drop the user into
-      // the seeded "All" squad — it grants visibility of every inbound and
-      // matches pre-slice-26 behaviour. Slice 26 invariant: every user is in
-      // at least one group, otherwise their subscription would be empty.
-      create: (input.groupIds.length > 0 ? input.groupIds : [ALL_SQUAD_ID]).map(
-        (groupId) => ({ groupId }),
-      ),
-    },
-  });
+      traffic: { create: {} },
+      groupMembers: {
+        // When admin doesn't pick any squads explicitly, drop the user into
+        // the seeded "All" squad: it grants visibility of every inbound and
+        // matches pre-slice-26 behaviour. Slice 26 invariant: every user is in
+        // at least one group, otherwise their subscription would be empty.
+        create: (input.groupIds.length > 0 ? input.groupIds : [ALL_SQUAD_ID]).map(
+          (groupId) => ({ groupId }),
+        ),
+      },
+    });
+  } catch (err) {
+    // Map a DB-level UNIQUE violation on the partial index
+    // (users_username_active_key, WHERE deleted_at IS NULL) back to the
+    // friendly 409. The findActiveByUsername check above is check-then-insert,
+    // so two concurrent creates can both pass it and race on the INSERT; the
+    // loser surfaces here as P2002 instead of a raw 500. Mirrors
+    // nodes.service.ts createNode.
+    if (isUniqueViolation(err)) {
+      throw new UserAlreadyExistsError(input.username);
+    }
+    throw err;
+  }
 
   eventBus.emit('user.created', {
     userId: user.id,
@@ -167,9 +190,14 @@ export async function updateUser(
     changedFields.push('email');
   }
   if (input.groupIds !== undefined) {
+    // Mirror createUser's fallback: an empty groupIds means "no squads picked",
+    // but deleteMany + create:[] would leave the user in zero groups and their
+    // subscription silently empty. Slice 26 invariant: every user is in at
+    // least one group, so fall back to the seeded "All" squad here too.
+    const groupIds = input.groupIds.length > 0 ? input.groupIds : [ALL_SQUAD_ID];
     data.groupMembers = {
       deleteMany: {},
-      create: input.groupIds.map((groupId) => ({ groupId })),
+      create: groupIds.map((groupId) => ({ groupId })),
     };
     changedFields.push('groupIds');
   }

@@ -89,17 +89,20 @@ func (a *Adapter) Start(ctx context.Context) error {
 	return a.regenerateAndRestart(ctx)
 }
 
-// Stop terminates the subprocess. The on-disk config is left in place.
+// Stop terminates the subprocess. The on-disk config is left in place. Reads +
+// clears the shared fields under a.mu, then does the slow proc.Stop with the
+// lock released so Healthy()/GetStats never block behind it (Bug #1).
 func (a *Adapter) Stop(ctx context.Context) error {
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	a.started = false
-	if a.proc == nil {
+	proc := a.proc
+	a.proc = nil
+	a.mu.Unlock()
+
+	if proc == nil {
 		return nil
 	}
-	err := a.proc.Stop(ctx)
-	a.proc = nil
-	return err
+	return proc.Stop(ctx)
 }
 
 // AddUser registers a user. We use user.XrayUUID as the SS password —

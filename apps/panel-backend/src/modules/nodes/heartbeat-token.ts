@@ -25,6 +25,14 @@ export interface VerifiedHeartbeatToken {
   nodeId: string;
 }
 
+// Node.id is a Postgres UUID column. A token whose left segment is not a
+// well-formed UUID would reach prisma.node.findUnique({ where: { id } }) and
+// make Prisma throw P2023 (inconsistent column data), surfacing as a 500
+// instead of the intended 401 INVALID_TOKEN. Validate the shape here and
+// reject early so a malformed nodeId fails as cleanly as a bad signature.
+const UUID_V4_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 export function verifyHeartbeatToken(
   token: string,
   lookupSecret: (nodeId: string) => Promise<Buffer | null>,
@@ -34,6 +42,10 @@ export function verifyHeartbeatToken(
     if (dot <= 0 || dot === token.length - 1) return null;
     const nodeId = token.slice(0, dot);
     const provided = token.slice(dot + 1);
+
+    // Reject malformed nodeIds before they hit the UUID column lookup, so an
+    // invalid id returns 401 (null here) instead of a Prisma P2023 -> 500.
+    if (!UUID_V4_RE.test(nodeId)) return null;
 
     const secret = await lookupSecret(nodeId);
     if (!secret) return null;

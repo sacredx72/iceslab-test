@@ -149,10 +149,13 @@ const ObfuscationSchema = z.object({
   s2: z.number().int().min(0).max(64).default(56),
   s3: z.number().int().min(0).max(64).default(32),
   s4: z.number().int().min(0).max(32).default(16),
-  h1: z.number().int().min(5).default(100),
-  h2: z.number().int().min(5).default(200),
-  h3: z.number().int().min(5).default(300),
-  h4: z.number().int().min(5).default(400),
+  // H1-H4 replace the WG message-type marker; the node's config.go validate()
+  // requires each > 4, pairwise distinct, and fitting a uint32. The cross-field
+  // distinctness check lives in AmneziawgConfigSchema's superRefine below.
+  h1: z.number().int().min(5).max(4294967295).default(100),
+  h2: z.number().int().min(5).max(4294967295).default(200),
+  h3: z.number().int().min(5).max(4294967295).default(300),
+  h4: z.number().int().min(5).max(4294967295).default(400),
   // Hex-encoded mimicry packets — optional, v2.0 feature. When empty,
   // the kernel module skips that slot. Each up to 256 hex chars
   // (128 bytes) per upstream guidance.
@@ -163,14 +166,52 @@ const ObfuscationSchema = z.object({
   i5: z.string().regex(/^[0-9a-fA-F]*$/).max(256).default(''),
 });
 
-export const AmneziawgConfigSchema = z.object({
-  /** Subnet handed to peers, e.g. "10.0.0.0/24". */
-  subnet: z.string().regex(/^\d{1,3}(\.\d{1,3}){3}\/\d{1,2}$/),
-  serverPrivateKey: z.string().min(1).max(128),
-  /** Public key paired with privateKey — emitted in client config. */
-  serverPublicKey: z.string().min(1).max(128),
-  obfuscation: ObfuscationSchema,
-});
+export const AmneziawgConfigSchema = z
+  .object({
+    /** Subnet handed to peers, e.g. "10.0.0.0/24". */
+    subnet: z.string().regex(/^\d{1,3}(\.\d{1,3}){3}\/\d{1,2}$/),
+    serverPrivateKey: z.string().min(1).max(128),
+    /** Public key paired with privateKey — emitted in client config. */
+    serverPublicKey: z.string().min(1).max(128),
+    obfuscation: ObfuscationSchema,
+  })
+  // Mirror the constraints the node's config.go validate() enforces at deploy
+  // time, so the operator gets a clear form error instead of a confusing
+  // "config push failed" after save. Refining this nested ZodObject is safe:
+  // the InboundConfigByProtocol discriminated union keys off the top-level
+  // `protocol` literal, not off this `config` member, so the refinement does
+  // not interfere with discrimination.
+  .superRefine((cfg, ctx) => {
+    const { obfuscation } = cfg;
+    // H1-H4 must be pairwise distinct (a repeated header value collapses two
+    // packet types onto the same marker and breaks the obfuscation).
+    const headers: Array<['h1' | 'h2' | 'h3' | 'h4', number]> = [
+      ['h1', obfuscation.h1],
+      ['h2', obfuscation.h2],
+      ['h3', obfuscation.h3],
+      ['h4', obfuscation.h4],
+    ];
+    for (let i = 0; i < headers.length; i++) {
+      for (let j = i + 1; j < headers.length; j++) {
+        if (headers[i][1] === headers[j][1]) {
+          ctx.addIssue({
+            code: 'custom',
+            message: `H1-H4 must be pairwise distinct (${headers[i][0]} equals ${headers[j][0]})`,
+            path: ['obfuscation', headers[j][0]],
+          });
+        }
+      }
+    }
+    // s1 + 56 must NOT equal s2: that recreates the vanilla WireGuard handshake
+    // packet length and makes the flow DPI-detectable.
+    if (obfuscation.s1 + 56 === obfuscation.s2) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 's1 + 56 must not equal s2 (recreates the vanilla WireGuard handshake length, making the flow detectable)',
+        path: ['obfuscation', 's2'],
+      });
+    }
+  });
 
 export const NaiveConfigSchema = z.object({
   hostname: z

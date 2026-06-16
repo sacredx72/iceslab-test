@@ -77,6 +77,9 @@ export function generateUserCredentials(): UserCredentials {
     amneziawgPrivateKey: wg.privateKey,
     amneziawgPublicKey:  wg.publicKey,
     subscriptionToken:   randomUrlSafe(32),  // ~43 chars
-    shortId:             randomUrlSafe(8),   // ~11 chars
+    // REALITY shortIds must be hex (the Xray validator + adapter reject
+    // base64url's '-', '_' and mixed case). 8 bytes -> 16 hex chars, the max
+    // shortId length REALITY allows.
+    shortId:             randomBytes(8).toString('hex'), // 16 hex chars
   };
 }

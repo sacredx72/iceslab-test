@@ -106,16 +106,20 @@ func (a *Adapter) Start(ctx context.Context) error {
 	return a.regenerateAndRestart(ctx)
 }
 
+// Stop terminates mtg. Reads + clears the shared fields under a.mu, then does
+// the slow proc.Stop with the lock released so Healthy()/GetStats never block
+// behind it (Bug #1).
 func (a *Adapter) Stop(ctx context.Context) error {
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	a.started = false
-	if a.proc == nil {
+	proc := a.proc
+	a.proc = nil
+	a.mu.Unlock()
+
+	if proc == nil {
 		return nil
 	}
-	err := a.proc.Stop(ctx)
-	a.proc = nil
-	return err
+	return proc.Stop(ctx)
 }
 
 // AddUser is a panel-side bookkeeping no-op for MTProto. The mtg server

@@ -118,6 +118,16 @@ export function computeNodeStatsWrites(input: NodeStatsInput): NodeStatsWrites {
     historyRows.push({ userId, bytesIn: h.in, bytesOut: h.out });
   }
 
+  // Deadlock avoidance (Postgres 40P01): two concurrent per-node transactions
+  // bulk-upserting the same user_traffic rows can deadlock if they take the
+  // shared row locks in opposite orders (the node reports userIds in arbitrary
+  // order). Sort both row arrays by userId ascending so every transaction
+  // acquires those locks in the same global order. The agent already drained
+  // xray with -reset before we get here, so a deadlocked tick's delta would be
+  // lost - ordering the unnest is what keeps it. Order-only; values unchanged.
+  userTrafficRows.sort((a, b) => (a.userId < b.userId ? -1 : a.userId > b.userId ? 1 : 0));
+  historyRows.sort((a, b) => (a.userId < b.userId ? -1 : a.userId > b.userId ? 1 : 0));
+
   // Single-counter fallback (mtproto-style): no per-user bytes at all, so roll
   // the node's cumulative totals into a per-poll delta against the snapshot.
   // first-sight (no prev) records the full cumulative as a delta - preserved

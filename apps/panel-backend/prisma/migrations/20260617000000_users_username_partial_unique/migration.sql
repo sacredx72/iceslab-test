@@ -1,0 +1,23 @@
+-- Add a **partial** unique index on `users.username` that only enforces
+-- uniqueness across ACTIVE rows (`deleted_at IS NULL`), mirroring the
+-- nodes.name / nodes.address pattern.
+--
+-- createUser was check-then-insert (findActiveByUsername then repo.create)
+-- with no DB-level constraint backing it. Two concurrent creates with the
+-- same username could both pass the app-level check and produce duplicate
+-- ACTIVE users, leaving the panel with an ambiguous subscription token /
+-- username pair. The partial unique index closes that TOCTOU race at the DB.
+--
+-- It must stay partial: soft-deleted rows (`deleted_at` set) keep their old
+-- username, so a plain UNIQUE would block recreating a user with a previously
+-- used name. Postgres's partial UNIQUE INDEX ignores tombstoned rows, so
+-- `INSERT (username) VALUES ('alice')` succeeds whenever no ACTIVE row holds
+-- that name.
+--
+-- No `@unique` annotation is added to `prisma/schema.prisma` for users.username:
+-- Prisma 7 doesn't model partial unique indexes natively, so the schema-side
+-- guarantee is enforced at the application layer (users.service.ts
+-- findActiveByUsername + a P2002 catch around `repo.create`).
+
+-- CreateIndex (partial unique - only active rows)
+CREATE UNIQUE INDEX "users_username_active_key" ON "users"("username") WHERE "deleted_at" IS NULL;

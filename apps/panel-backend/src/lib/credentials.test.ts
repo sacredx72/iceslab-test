@@ -33,10 +33,11 @@ describe('generateUserCredentials', () => {
     expect(creds.subscriptionToken.length).toBeGreaterThanOrEqual(40);
   });
 
-  it('produces a short, base64url shortId', () => {
+  it('produces a hex shortId within the REALITY 16-char limit', () => {
     const creds = generateUserCredentials();
-    expect(creds.shortId).toMatch(BASE64URL_RE);
-    expect(creds.shortId.length).toBeLessThan(16);
+    // REALITY shortIds must be hex (the inbound schema enforces ^[0-9a-fA-F]{0,16}$).
+    expect(creds.shortId).toMatch(/^[0-9a-f]+$/);
+    expect(creds.shortId.length).toBeLessThanOrEqual(16);
   });
 
   it('produces unique credentials on each call', () => {

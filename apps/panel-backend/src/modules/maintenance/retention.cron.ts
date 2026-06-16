@@ -1,4 +1,5 @@
 import { prisma } from '../../prisma.js';
+import { purgeExpiredBootstrapTokens } from '../nodes/bootstrap.service.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -24,16 +25,21 @@ export interface PruneResult {
   subscriptionRequests: number;
   nodeUserUsage: number;
   nodeUsage: number;
+  bootstrapTokens: number;
 }
 
 /**
  * Delete history rows older than their retention window. Idempotent and safe
  * to run repeatedly: a second run the same day deletes nothing. Each deleteMany
  * is independent, so one slow table never blocks the others.
+ *
+ * Also purges expired/consumed node_bootstrap_tokens here - they're short-TTL
+ * single-use rows that nothing else cleans up, so without this daily sweep the
+ * table grows unbounded.
  */
 export async function pruneHistory(): Promise<PruneResult> {
   const now = Date.now();
-  const [subscriptionRequests, nodeUserUsage, nodeUsage] = await Promise.all([
+  const [subscriptionRequests, nodeUserUsage, nodeUsage, bootstrapTokens] = await Promise.all([
     prisma.subscriptionRequestHistory.deleteMany({
       where: { requestedAt: { lt: new Date(now - RETENTION_DAYS.subscriptionRequests * DAY_MS) } },
     }),
@@ -43,10 +49,12 @@ export async function pruneHistory(): Promise<PruneResult> {
     prisma.nodeUsageHistory.deleteMany({
       where: { hour: { lt: new Date(now - RETENTION_DAYS.nodeUsage * DAY_MS) } },
     }),
+    purgeExpiredBootstrapTokens(),
   ]);
   return {
     subscriptionRequests: subscriptionRequests.count,
     nodeUserUsage: nodeUserUsage.count,
     nodeUsage: nodeUsage.count,
+    bootstrapTokens,
   };
 }

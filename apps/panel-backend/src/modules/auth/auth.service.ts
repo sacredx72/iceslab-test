@@ -1,3 +1,4 @@
+import bcrypt from 'bcrypt';
 import type { AdminUser } from '../../generated/prisma/client.js';
 import {
   findAdminByUsername,
@@ -7,6 +8,17 @@ import type { LoginInput } from './auth.schemas.js';
 import { redis } from '../../lib/redis.js';
 import { config } from '../../config.js';
 import { verifyTotp } from '../../lib/totp.js';
+
+// Constant-work mitigation for username enumeration. When the username does
+// not exist we skip the real bcrypt.compare, so the not-found branch returns
+// in ~0ms while a real account spends ~250ms hashing (cost 12, see
+// admin.service BCRYPT_COST). That timing gap is an oracle: an attacker can
+// tell valid usernames from invalid ones. To close it we run a throwaway
+// bcrypt.compare against this fixed, valid $2b$12$ hash on the not-found
+// branch so both paths burn comparable CPU before failing identically.
+// The plaintext behind this hash is irrelevant — the compare always fails;
+// only the cost factor (12) matters and must match admin.service BCRYPT_COST.
+const DUMMY_HASH = '$2b$12$C6UzMDM.H6dfI/f/IKcEeO3jKxHnL9Q8vLpJ9wq0r0aYzX1tVbW3K';
 
 export class InvalidCredentialsError extends Error {
   constructor() {
@@ -101,6 +113,11 @@ export async function login(input: LoginInput, clientIp: string): Promise<AdminU
 
   const admin = await findAdminByUsername(input.username);
   if (!admin) {
+    // Burn comparable CPU to the admin-exists path before failing, so the
+    // response time does not reveal whether the username exists. The compare
+    // is expected to fail; we ignore its result and fail the same way as a
+    // real wrong password below.
+    await bcrypt.compare(input.password, DUMMY_HASH);
     await recordFailure(clientIp, input.username);
     throw new InvalidCredentialsError();
   }
