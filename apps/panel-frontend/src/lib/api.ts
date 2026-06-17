@@ -3,8 +3,18 @@ import type { RoutingPresetId } from '@iceslab/shared';
 import { useAuth } from '../stores/auth';
 import { queryClient } from './queryClient';
 
+// Same-origin by default in PRODUCTION builds: the frontend nginx (and the
+// install's Caddy) reverse-proxy /api, /sub, /health to the backend, so a
+// relative baseURL "just works" and survives a build that forgot to set
+// VITE_API_BASE_URL. Only DEV falls back to the cross-origin localhost:3000
+// (vite dev server on :5173 talking to the backend on :3000). An explicit
+// VITE_API_BASE_URL (including the Dockerfile's empty string) always wins.
+// Hardening: a prod build that defaulted to localhost:3000 made the SPA call
+// the VIEWER's own machine, so login never reached the backend and no JWT was
+// issued (surfaces to the operator as "jwt does not show" after sign-in).
 export const API_BASE_URL =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://localhost:3000';
+  (import.meta.env.VITE_API_BASE_URL as string | undefined) ??
+  (import.meta.env.PROD ? '' : 'http://localhost:3000');
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
