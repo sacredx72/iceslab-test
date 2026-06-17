@@ -280,7 +280,7 @@ CURRENT_SWAP_MB=$(free -m | awk '/^Swap:/ {print $2}')
 ok "RAM: ${TOTAL_RAM_MB} MB · swap: ${CURRENT_SWAP_MB} MB"
 
 if [[ "$TOTAL_RAM_MB" -lt 3500 && "$CURRENT_SWAP_MB" -lt 1000 ]]; then
-  if [[ "${SKIP_SWAP:-0}" == "1" ]]; then
+  if [[ "${SKIP_SWAP:-1}" == "1" ]]; then
     warn "RAM=${TOTAL_RAM_MB} MB and swap is empty; Docker build will likely OOM."
     warn "SKIP_SWAP=1 was set, not creating swap. Build may hang or be killed."
   else
