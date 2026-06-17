@@ -19,7 +19,7 @@ Point an A-record at the VPS (`panel.example.com`, DNS only / gray cloud on Clou
 ```bash
 sudo -i
 PANEL_DOMAIN=panel.example.com \
-  bash <(curl -fsSL https://raw.githubusercontent.com/icecompany-tech/iceslab/main/scripts/install-iceslab.sh)
+  bash <(curl -fsSL https://raw.githubusercontent.com/sacredx72/iceslab-test/main/scripts/install-iceslab.sh)
 ```
 
 Installs Docker, builds the panel images, brings up Postgres + Redis + backend + frontend, installs Caddy with auto-TLS, locks ufw to 22/80/443. First run takes 5-10 minutes.
@@ -28,7 +28,7 @@ For quick local testing without TLS:
 
 ```bash
 sudo -i
-bash <(curl -fsSL https://raw.githubusercontent.com/icecompany-tech/iceslab/main/scripts/install-iceslab.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/sacredx72/iceslab-test/main/scripts/install-iceslab.sh)
 ```
 
 The SPA comes up on `http://<vps-ip>:8080`. JWTs travel in cleartext, so don't expose this to the internet.
