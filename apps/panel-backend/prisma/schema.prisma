@@ -404,6 +404,11 @@ model User {
   // Limits
   hwidDeviceLimit Int? @map("hwid_device_limit")
 
+  // R3 - optional per-user routing-preset override. Null = inherit (squad ->
+  // global -> default). Highest precedence: wins over squad and global, loses
+  // only to the per-request ?routing= query.
+  routingPreset String? @map("routing_preset") @db.VarChar(32)
+
   // Slice 27.5 — sticky-affinity hint for subscription generator.
   // NULL = no preference (current behaviour). When set, the generator
   // may bias the URL ordering toward this node so the client's url-test

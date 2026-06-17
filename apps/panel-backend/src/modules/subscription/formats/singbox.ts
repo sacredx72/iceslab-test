@@ -43,9 +43,10 @@ export interface SingboxBuildOpts {
 }
 
 /**
- * Routing Templates (R1b) - `routingPreset: 'ru-split'` adds `route.rules` +
- * `route.rule_set` ahead of `route.final`: ads/malware rejected, RU domains
- * and RU/private IPs direct, everything else falls through to the tunnel.
+ * Routing Templates (R1b + H2) - a split `routingPreset` adds `route.rules` +
+ * `route.rule_set` ahead of `route.final`: ads/malware rejected, region domains
+ * and region/private IPs direct, everything else falls through to the tunnel.
+ * `ru-split` uses RU rule-sets; `cn-split` uses geosite-cn / geoip-cn.
  *
  * sing-box removed geosite:/geoip: in 1.12, so the only portable vehicle is
  * remote rule-sets (.srs) from the SagerNet-published repos. We deliberately
@@ -104,13 +105,66 @@ const RU_SPLIT_RULES: ReadonlyArray<Record<string, unknown>> = [
   },
 ];
 
+/**
+ * H2 - the China mirror of the RU rule-sets. `geosite-cn.srs` (SagerNet/
+ * sing-geosite) is the single comprehensive mainland category, so one geosite
+ * set, not two; `geoip-cn.srs` from SagerNet/sing-geoip. Same `.srs` URL
+ * pattern as RU. As with ru-split, split DNS is deliberately omitted (the
+ * sing-box DNS server format churned across 1.12/1.14).
+ */
+const CN_SPLIT_RULE_SETS: ReadonlyArray<Record<string, unknown>> = [
+  {
+    type: 'remote',
+    tag: 'geosite-category-ads-all',
+    format: 'binary',
+    url: 'https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ads-all.srs',
+  },
+  {
+    type: 'remote',
+    tag: 'geosite-cn',
+    format: 'binary',
+    url: 'https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs',
+  },
+  {
+    type: 'remote',
+    tag: 'geoip-cn',
+    format: 'binary',
+    url: 'https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs',
+  },
+];
+
+const CN_SPLIT_RULES: ReadonlyArray<Record<string, unknown>> = [
+  { rule_set: ['geosite-category-ads-all'], action: 'reject' },
+  { ip_is_private: true, action: 'route', outbound: 'direct' },
+  {
+    rule_set: ['geosite-cn', 'geoip-cn'],
+    action: 'route',
+    outbound: 'direct',
+  },
+];
+
 export function buildSingboxJson(
   endpoints: SubscriptionEndpoint[],
   opts: SingboxBuildOpts = {},
 ): string {
   const outbounds: Record<string, unknown>[] = [];
   const proxyTags: string[] = [];
-  const ruSplit = (opts.routingPreset ?? 'proxy-all') === 'ru-split';
+  // Routing preset (R1b + H2). Each split preset selects its own route rules +
+  // remote rule-sets; proxy-all leaves them null so the output stays
+  // byte-identical to pre-R1 builds.
+  const preset = opts.routingPreset ?? 'proxy-all';
+  const splitRules =
+    preset === 'ru-split'
+      ? RU_SPLIT_RULES
+      : preset === 'cn-split'
+        ? CN_SPLIT_RULES
+        : null;
+  const splitRuleSets =
+    preset === 'ru-split'
+      ? RU_SPLIT_RULE_SETS
+      : preset === 'cn-split'
+        ? CN_SPLIT_RULE_SETS
+        : null;
 
   for (const e of endpoints) {
     const tag = `${e.nodeName}-${e.protocol}`;
@@ -282,12 +336,16 @@ export function buildSingboxJson(
   }
   outbounds.push({ type: 'direct', tag: 'direct' });
 
+  // R3 - operator custom domain lists are intentionally NOT emitted for
+  // sing-box: there is no portable inline-domain route-rule vehicle post-1.12
+  // (same rationale as the skipped sing-box DNS split in R2 and the skipped
+  // R3-b custom rules). xray/xkeen + clash carry the lists instead.
   const config = {
     log: { level: 'info', timestamp: true },
     outbounds,
     route: {
-      ...(ruSplit
-        ? { rules: RU_SPLIT_RULES, rule_set: RU_SPLIT_RULE_SETS }
+      ...(splitRules
+        ? { rules: splitRules, rule_set: splitRuleSets }
         : {}),
       final: primaryTag,
       auto_detect_interface: true,

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ROUTING_PRESET_IDS } from '@iceslab/shared';
 import { PermissiveUuid } from '../../lib/uuid-schema.js';
 
 // ───── Reusable atoms ─────
@@ -40,6 +41,9 @@ export const CreateUserSchema = z.object({
   ]).nullish(),
   email: z.email().max(255).nullish(),
   groupIds: z.array(PermissiveUuid).default([]),
+  // R3 - optional per-user routing-preset override. Null = inherit (squad ->
+  // global -> default). Wins over squad/global, loses only to ?routing= query.
+  routingPreset: z.enum(ROUTING_PRESET_IDS).nullable().optional(),
   // Slice 27 follow-up: enabledProtocols accepted for back-compat with API
   // clients but no longer affects subscription output. Squad ACL alone
   // determines visibility. Empty/missing → defaults to all 7 (was previously
@@ -66,6 +70,8 @@ export const UpdateUserSchema = z.object({
   ]).nullish(),
   email: z.email().max(255).nullish(),
   groupIds: z.array(PermissiveUuid).optional(),
+  // R3 - per-user routing-preset override. Null clears it (back to inherit).
+  routingPreset: z.enum(ROUTING_PRESET_IDS).nullable().optional(),
   // Slice 27 follow-up: kept for back-compat, ignored by subscription.
   enabledProtocols: z.array(ProtocolName).optional(),
 });

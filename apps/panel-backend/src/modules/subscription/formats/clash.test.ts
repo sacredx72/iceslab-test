@@ -270,4 +270,145 @@ describe('buildClashYaml', () => {
       expect(out.indexOf('dns:')).toBeLessThan(out.indexOf('proxies:'));
     });
   });
+
+  // ───── Routing Templates (H2) - cn-split ─────
+
+  describe('routingPreset cn-split', () => {
+    function ruleLines(out: string): string[] {
+      return out
+        .slice(out.indexOf('rules:'))
+        .split('\n')
+        .filter((l) => l.startsWith('  - '))
+        .map((l) => l.trim());
+    }
+
+    it('emits the shared geo block with jsdelivr mirrors and auto-update', () => {
+      const out = buildClashYaml([xrayEp], { routingPreset: 'cn-split' });
+      expect(out).toContain('geo-auto-update: true');
+      expect(out).toContain('geo-update-interval: 72');
+      expect(out).toContain(
+        'geosite: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat"',
+      );
+    });
+
+    it('rules: ads reject first, one GEOSITE,cn + private direct, GEOIP,CN before catch-all', () => {
+      const out = buildClashYaml([xrayEp], { routingPreset: 'cn-split' });
+      const rules = ruleLines(out);
+      expect(rules[0]).toBe('- GEOSITE,category-ads-all,REJECT');
+      expect(rules).toContain('- GEOSITE,cn,DIRECT');
+      expect(rules).toContain('- IP-CIDR,10.0.0.0/8,DIRECT,no-resolve');
+      expect(rules).toContain('- IP-CIDR6,fc00::/7,DIRECT,no-resolve');
+      // GEOIP,CN resolves (no no-resolve) and sits right before the catch-all.
+      expect(rules[rules.length - 2]).toBe('- GEOIP,CN,DIRECT');
+      expect(rules[rules.length - 1]).toBe('- MATCH,Auto');
+      // No RU lines leak in.
+      expect(out).not.toContain('GEOSITE,category-ru');
+      expect(out).not.toContain('GEOIP,RU');
+    });
+
+    it('emits split-DNS block pinned to AliDNS via nameserver-policy', () => {
+      const out = buildClashYaml([xrayEp], { routingPreset: 'cn-split' });
+      expect(out).toContain('dns:');
+      expect(out).toContain('  enhanced-mode: fake-ip');
+      // China domains pinned to AliDNS.
+      expect(out).toContain('    "geosite:cn": 223.5.5.5');
+      expect(out).toContain('    - 223.5.5.5');
+      // The DoH general resolvers stay identical to ru-split.
+      expect(out).toContain('    - https://1.1.1.1/dns-query');
+      // No Yandex resolver.
+      expect(out).not.toContain('77.88.8.8');
+    });
+  });
+
+  // ───── Byte-identity regression guards (H2) ─────
+
+  describe('routingPreset byte-identity (H2 guard)', () => {
+    it('proxy-all stays byte-identical to the default build', () => {
+      expect(buildClashYaml([xrayEp], { routingPreset: 'proxy-all' })).toBe(
+        buildClashYaml([xrayEp]),
+      );
+    });
+
+    it('ru-split output differs from cn-split', () => {
+      expect(buildClashYaml([xrayEp], { routingPreset: 'ru-split' })).not.toBe(
+        buildClashYaml([xrayEp], { routingPreset: 'cn-split' }),
+      );
+    });
+  });
+
+  // R3 - operator custom domain lists.
+  describe('customDomainLists (R3)', () => {
+    function ruleLines(out: string): string[] {
+      return out
+        .slice(out.indexOf('rules:'))
+        .split('\n')
+        .filter((l) => l.startsWith('  - '))
+        .map((l) => l.trim());
+    }
+
+    it('empty lists keep output byte-identical to no lists', () => {
+      expect(
+        buildClashYaml([xrayEp], { customDomainLists: { direct: [], proxy: [], block: [] } }),
+      ).toBe(buildClashYaml([xrayEp]));
+    });
+
+    it('undefined lists keep output byte-identical', () => {
+      expect(buildClashYaml([xrayEp], { customDomainLists: undefined })).toBe(
+        buildClashYaml([xrayEp]),
+      );
+    });
+
+    it('emits DOMAIN-SUFFIX rules ordered block (REJECT) -> direct (DIRECT) -> proxy (Auto)', () => {
+      const out = buildClashYaml([xrayEp], {
+        customDomainLists: {
+          block: ['ads.example.com'],
+          direct: ['example.ru'],
+          proxy: ['youtube.com'],
+        },
+      });
+      const rules = ruleLines(out);
+      expect(rules[0]).toBe('- DOMAIN-SUFFIX,ads.example.com,REJECT');
+      expect(rules[1]).toBe('- DOMAIN-SUFFIX,example.ru,DIRECT');
+      expect(rules[2]).toBe('- DOMAIN-SUFFIX,youtube.com,Auto');
+      // Catch-all stays last.
+      expect(rules[rules.length - 1]).toBe('- MATCH,Auto');
+    });
+
+    it('strips xray geosite-style prefixes Clash cannot parse', () => {
+      const out = buildClashYaml([xrayEp], {
+        customDomainLists: {
+          direct: ['domain:gosuslugi.ru', 'full:exact.ru', 'regexp:.*\\.ru'],
+          proxy: [],
+          block: [],
+        },
+      });
+      const rules = ruleLines(out);
+      expect(rules).toContain('- DOMAIN-SUFFIX,gosuslugi.ru,DIRECT');
+      expect(rules).toContain('- DOMAIN-SUFFIX,exact.ru,DIRECT');
+      expect(rules).toContain('- DOMAIN-SUFFIX,.*\\.ru,DIRECT');
+      expect(out).not.toContain('domain:gosuslugi.ru');
+    });
+
+    it('drops the proxy bucket when no proxy exists (catch-all stays MATCH,DIRECT)', () => {
+      const out = buildClashYaml([], {
+        customDomainLists: { direct: ['example.ru'], proxy: ['youtube.com'], block: [] },
+      });
+      const rules = ruleLines(out);
+      expect(rules).toContain('- DOMAIN-SUFFIX,example.ru,DIRECT');
+      expect(out).not.toContain('youtube.com');
+      expect(rules[rules.length - 1]).toBe('- MATCH,DIRECT');
+    });
+
+    it('custom-domain lines sit ahead of ru-split lines and before the catch-all', () => {
+      const out = buildClashYaml([xrayEp], {
+        routingPreset: 'ru-split',
+        customDomainLists: { direct: ['example.ru'], proxy: [], block: [] },
+      });
+      const rules = ruleLines(out);
+      // Custom domain line is first, ru-split block follows, MATCH,Auto last.
+      expect(rules[0]).toBe('- DOMAIN-SUFFIX,example.ru,DIRECT');
+      expect(rules).toContain('- GEOSITE,category-ads-all,REJECT');
+      expect(rules[rules.length - 1]).toBe('- MATCH,Auto');
+    });
+  });
 });

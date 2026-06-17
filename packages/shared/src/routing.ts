@@ -8,11 +8,16 @@
  *     is byte-identical to pre-R1 builds.
  *   - `ru-split` : ads/malware blocked, RU domains + RU IPs + private ranges
  *     direct, everything else (including blocked sites) through the tunnel.
+ *   - `cn-split` : the China-direct mirror of `ru-split`. Ads/malware blocked,
+ *     China domains (geosite:cn) + China IPs (geoip:cn) + private ranges
+ *     direct, everything else through the tunnel. Same shape as `ru-split`;
+ *     only the geo categories and the clean-DNS resolver differ (AliDNS
+ *     223.5.5.5 instead of Yandex 77.88.8.8).
  *
  * Stored in AppSetting under `subscriptionRoutingPreset`; overridable per
  * request via `?routing=` on /sub (mirrors the `bundle` param pattern).
  */
-export const ROUTING_PRESET_IDS = ['proxy-all', 'ru-split'] as const;
+export const ROUTING_PRESET_IDS = ['proxy-all', 'ru-split', 'cn-split'] as const;
 
 export type RoutingPresetId = (typeof ROUTING_PRESET_IDS)[number];
 

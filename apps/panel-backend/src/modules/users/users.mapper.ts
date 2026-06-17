@@ -29,6 +29,9 @@ export interface PublicUserDto {
   // Limits
   hwidDeviceLimit: number | null;
 
+  // R3 - per-user routing-preset override; null = inherit (squad -> global -> default).
+  routingPreset: string | null;
+
   // Metadata
   description: string | null;
   tag: string | null;
@@ -83,6 +86,8 @@ export function mapUserToPublic(
     subRevokedAt: user.subRevokedAt ? user.subRevokedAt.toISOString() : null,
 
     hwidDeviceLimit: user.hwidDeviceLimit,
+
+    routingPreset: user.routingPreset,
 
     description: user.description,
     tag: user.tag,

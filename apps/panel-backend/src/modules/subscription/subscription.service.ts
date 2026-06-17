@@ -68,6 +68,9 @@ export interface SubscriptionResult {
   // inherit the panel-wide default. The single distinct non-null preset across
   // the user's squads; null when no squad overrides OR they conflict.
   squadRoutingPreset: RoutingPresetId | null;
+  // R3 - the user's explicit per-user routing override, or null to inherit
+  // (squad -> global -> default). Highest precedence below the ?routing= query.
+  userRoutingPreset: RoutingPresetId | null;
 }
 
 /**
@@ -653,5 +656,8 @@ export async function generateSubscription(
     textPlain: encodePlainList(endpoints.map((e) => e.uri)),
     json: buildSubscriptionJson(user, endpoints),
     squadRoutingPreset,
+    // R3 - per-user override (scalar already loaded on `user`). Garbage / unset
+    // values fall through to null so the route's chain drops to the next tier.
+    userRoutingPreset: isRoutingPresetId(user.routingPreset) ? user.routingPreset : null,
   };
 }

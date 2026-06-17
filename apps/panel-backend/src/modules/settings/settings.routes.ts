@@ -27,10 +27,17 @@ import { invalidateSubscriptionSettingsCache } from './settings.service.js';
  *   - `subscriptionAnnounceTemplate` (string)     — Announce header template,
  *                                                   placeholders: {{TRAFFIC_LEFT}},
  *                                                   {{DAYS_LEFT}}, {{SUPPORT_URL}}
- *   - `subscriptionRoutingPreset` (enum, R1a)     - routing rules emitted into
+ *   - `subscriptionRoutingPreset` (enum, R1a + H2) - routing rules emitted into
  *                                                   clash/singbox/xrayjson:
  *                                                   'proxy-all' (default) |
- *                                                   'ru-split'
+ *                                                   'ru-split' | 'cn-split'
+ *   - `subscriptionTlsFragment` (boolean)         - when true, the Xray JSON
+ *                                                   format splits the client's
+ *                                                   outgoing ClientHello via a
+ *                                                   freedom `fragment` outbound
+ *                                                   so SNI-based DPI cannot
+ *                                                   cleanly match the handshake.
+ *                                                   Default false. Xray JSON only.
  *
  * Future keys land in the same table; flip `isPublic` per key.
  */
@@ -44,11 +51,24 @@ const UpsertInput = z.object({
   subscriptionSupportUrl: z.string().url().max(255).nullable().optional(),
   subscriptionAnnounceTemplate: z.string().max(512).nullable().optional(),
   subscriptionRoutingPreset: z.enum(ROUTING_PRESET_IDS).optional(),
+  // TLS-fragment - split the client's outgoing ClientHello so SNI-based DPI
+  // (RU TSPU / RKN) cannot cleanly match the handshake. Xray JSON format only.
+  subscriptionTlsFragment: z.boolean().optional(),
   // R3-b - raw custom xray routing rules (array of rule objects), or null to
   // clear. Applied to xray/xkeen subscription output ahead of the preset.
   subscriptionCustomRoutingRules: z
     .array(z.record(z.string(), z.unknown()))
     .max(50)
+    .nullable()
+    .optional(),
+  // R3 - operator-defined custom domain lists (direct/proxy/block), or null to
+  // clear. Emitted into xray/xkeen + clash routing rules ahead of the preset.
+  subscriptionCustomDomainLists: z
+    .object({
+      direct: z.array(z.string().min(1).max(253)).max(500).optional(),
+      proxy: z.array(z.string().min(1).max(253)).max(500).optional(),
+      block: z.array(z.string().min(1).max(253)).max(500).optional(),
+    })
     .nullable()
     .optional(),
 });

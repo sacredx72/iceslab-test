@@ -17,8 +17,14 @@ export interface SubscriptionSettings {
   announceTemplate: string | null;
   brandName: string | null;
   routingPreset: RoutingPresetId;
+  /** TLS-fragment - split the ClientHello via a freedom `fragment` outbound in
+   *  the Xray JSON format so SNI-DPI cannot match the handshake. Xray JSON only. */
+  tlsFragment: boolean;
   /** R3-b - raw custom xray routing rules, or null. Applied to xray/xkeen. */
   customRoutingRules: Record<string, unknown>[] | null;
+  /** R3 - operator-defined custom domain lists (direct/proxy/block), or null
+   *  when every bucket is empty. Emitted into xray/xkeen + clash routing rules. */
+  customDomainLists: { direct: string[]; proxy: string[]; block: string[] } | null;
 }
 
 // B5 - in-process cache for the subscription settings. `/sub/:token` is hit on
@@ -59,6 +65,10 @@ export async function getSubscriptionSettings(): Promise<SubscriptionSettings> {
   // 'proxy-all' (legacy behaviour) so a hand-edited row can never break /sub.
   const routingRaw = map.get('subscriptionRoutingPreset');
 
+  // TLS-fragment. Only the literal boolean true turns it on; missing / garbage
+  // rows fall back to false, keeping the Xray JSON output byte-identical.
+  const tlsFragment = map.get('subscriptionTlsFragment') === true;
+
   // R3-b - custom xray routing rules. Must be an array of objects, else null
   // so a hand-edited / malformed row can never break /sub.
   const customRaw = map.get('subscriptionCustomRoutingRules');
@@ -67,6 +77,27 @@ export async function getSubscriptionSettings(): Promise<SubscriptionSettings> {
       ? (customRaw as Record<string, unknown>[])
       : null;
 
+  // R3 - custom domain lists. Defensive parse: a non-object / malformed row
+  // yields null so the build path stays untouched (byte-identical). Only kept
+  // when at least one bucket holds >=1 non-empty string.
+  const cdlRaw = map.get('subscriptionCustomDomainLists');
+  const cdl =
+    cdlRaw && typeof cdlRaw === 'object' && !Array.isArray(cdlRaw)
+      ? (cdlRaw as Record<string, unknown>)
+      : null;
+  const asDomainArr = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((s): s is string => typeof s === 'string' && s.length > 0) : [];
+  const customDomainLists = cdl
+    ? (() => {
+        const lists = {
+          direct: asDomainArr(cdl.direct),
+          proxy: asDomainArr(cdl.proxy),
+          block: asDomainArr(cdl.block),
+        };
+        return lists.direct.length + lists.proxy.length + lists.block.length > 0 ? lists : null;
+      })()
+    : null;
+
   const value: SubscriptionSettings = {
     profileTitle: asString('subscriptionProfileTitle'),
     updateIntervalHours: asInt('subscriptionUpdateIntervalHours', 24),
@@ -74,7 +105,9 @@ export async function getSubscriptionSettings(): Promise<SubscriptionSettings> {
     announceTemplate: asString('subscriptionAnnounceTemplate'),
     brandName: asString('brandName'),
     routingPreset: isRoutingPresetId(routingRaw) ? routingRaw : 'proxy-all',
+    tlsFragment,
     customRoutingRules,
+    customDomainLists,
   };
   settingsCache = { value, expiresAt: Date.now() + SETTINGS_CACHE_TTL_MS };
   return value;

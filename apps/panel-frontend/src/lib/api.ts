@@ -184,6 +184,8 @@ export interface User {
   subscriptionToken: string;
   subRevokedAt: string | null;
   hwidDeviceLimit: number | null;
+  /** R3, per-user routing-preset override; null = inherit (squad -> global -> default). */
+  routingPreset: RoutingPresetId | null;
   description: string | null;
   tag: string | null;
   telegramId: string | null;
@@ -212,6 +214,8 @@ export interface CreateUserInput {
   email?: string | null;
   telegramId?: string | null;
   hwidDeviceLimit?: number | null;
+  /** R3, per-user routing-preset override; null = inherit. */
+  routingPreset?: RoutingPresetId | null;
   enabledProtocols?: ProtocolName[];
   /** Slice 26, squad membership. Empty/undefined → backend auto-adds to All. */
   groupIds?: string[];
@@ -227,6 +231,8 @@ export interface UpdateUserInput {
   email?: string | null;
   telegramId?: string | null;
   hwidDeviceLimit?: number | null;
+  /** R3, per-user routing-preset override; null clears it (back to inherit). */
+  routingPreset?: RoutingPresetId | null;
   enabledProtocols?: ProtocolName[];
   /** Slice 26, replaces the full squad set when provided. */
   groupIds?: string[];
@@ -1200,8 +1206,17 @@ export interface AdminSettings extends PublicSettings {
   subscriptionSupportUrl?: string | null;
   subscriptionAnnounceTemplate?: string | null;
   subscriptionRoutingPreset?: RoutingPresetId;
+  /** TLS-fragment - split the ClientHello in the Xray JSON format so SNI-DPI
+   *  cannot match the handshake. Xray JSON only. */
+  subscriptionTlsFragment?: boolean;
   /** R3-b - raw custom xray routing rules. */
   subscriptionCustomRoutingRules?: Record<string, unknown>[] | null;
+  /** R3 - operator-defined custom domain lists (direct/proxy/block). */
+  subscriptionCustomDomainLists?: {
+    direct?: string[];
+    proxy?: string[];
+    block?: string[];
+  } | null;
 }
 
 export interface UpdateSettingsInput {
@@ -1211,7 +1226,13 @@ export interface UpdateSettingsInput {
   subscriptionSupportUrl?: string | null;
   subscriptionAnnounceTemplate?: string | null;
   subscriptionRoutingPreset?: RoutingPresetId;
+  subscriptionTlsFragment?: boolean;
   subscriptionCustomRoutingRules?: Record<string, unknown>[] | null;
+  subscriptionCustomDomainLists?: {
+    direct?: string[];
+    proxy?: string[];
+    block?: string[];
+  } | null;
 }
 
 /** Fetch public-flagged settings, no auth required. Used by LoginPage so

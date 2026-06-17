@@ -34,11 +34,13 @@ import {
   IconLink,
   IconLock,
   IconMail,
+  IconRoute,
   IconShield,
   IconTag,
   IconTrash,
   IconUser,
 } from '@tabler/icons-react';
+import type { RoutingPresetId } from '@iceslab/shared';
 import { copyToClipboard } from '../lib/clipboard';
 import {
   ALL_SQUAD_ID,
@@ -88,6 +90,8 @@ interface FormValues {
   telegramId: string;
   hwidDeviceLimit: number | '';
   groupIds: string[];
+  // R3 - '' = inherit (squad -> global -> default).
+  routingPreset: string;
 }
 
 function defaultValues(user: User | null): FormValues {
@@ -116,6 +120,8 @@ function defaultValues(user: User | null): FormValues {
     // Basic положил"). Leave it empty - admin explicitly picks, otherwise
     // server auto-falls back to ALL.
     groupIds: user?.groupIds ?? [],
+    // R3 - per-user routing override; '' = inherit the squad/global default.
+    routingPreset: user?.routingPreset ?? '',
   };
 }
 
@@ -195,6 +201,8 @@ export function UserFormModal({ opened, onClose, user, onSubmit, loading }: Prop
         hwidDeviceLimit:
           values.hwidDeviceLimit === '' ? null : Number(values.hwidDeviceLimit),
         groupIds,
+        // R3 - '' clears the override (back to inherit).
+        routingPreset: (values.routingPreset as RoutingPresetId) || null,
       };
       await onSubmit(input);
     } else {
@@ -211,6 +219,8 @@ export function UserFormModal({ opened, onClose, user, onSubmit, loading }: Prop
         hwidDeviceLimit:
           values.hwidDeviceLimit === '' ? null : Number(values.hwidDeviceLimit),
         groupIds,
+        // R3 - '' = inherit the squad/global default.
+        routingPreset: (values.routingPreset as RoutingPresetId) || null,
       };
       await onSubmit(input);
     }
@@ -452,6 +462,22 @@ export function UserFormModal({ opened, onClose, user, onSubmit, loading }: Prop
                     {t('users.form.squadsEmptyFallbackHint')}
                   </Text>
                 )}
+              </SectionCard>
+
+              {/* R3 - per-user routing override. '' = inherit (squad ->
+                  global -> default). Mirrors the squad routing select. */}
+              <SectionCard icon={<IconRoute size={16} />} title={t('users.form.sections.routing')}>
+                <Select
+                  label={t('users.form.routing')}
+                  description={t('users.form.routingDesc')}
+                  data={[
+                    { value: '', label: t('users.form.routingInherit') },
+                    { value: 'proxy-all', label: t('users.form.routingProxyAll') },
+                    { value: 'ru-split', label: t('users.form.routingRuSplit') },
+                  ]}
+                  allowDeselect={false}
+                  {...form.getInputProps('routingPreset')}
+                />
               </SectionCard>
             </Stack>
           </SimpleGrid>

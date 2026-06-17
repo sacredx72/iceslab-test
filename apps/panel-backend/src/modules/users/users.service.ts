@@ -79,6 +79,8 @@ export async function createUser(input: CreateUserInput): Promise<PublicUserDto>
       expireAt:             daysFromNow(input.expireDays),
 
       hwidDeviceLimit: input.hwidDeviceLimit ?? null,
+      // R3 - per-user routing override; null = inherit (squad -> global -> default).
+      routingPreset:   input.routingPreset ?? null,
       description:     input.description ?? null,
       tag:             input.tag ?? null,
       telegramId:      toBigIntOrNull(input.telegramId),
@@ -172,6 +174,11 @@ export async function updateUser(
   if (input.hwidDeviceLimit !== undefined) {
     data.hwidDeviceLimit = input.hwidDeviceLimit;
     changedFields.push('hwidDeviceLimit');
+  }
+  if (input.routingPreset !== undefined) {
+    // R3 - null clears the override (back to inherit squad -> global -> default).
+    data.routingPreset = input.routingPreset;
+    changedFields.push('routingPreset');
   }
   if (input.description !== undefined) {
     data.description = input.description;

@@ -289,4 +289,71 @@ describe('buildSingboxJson', () => {
       expect(cfg.route.final).toBe('Auto-URLTest');
     });
   });
+
+  // ───── Routing Templates (H2) - cn-split ─────
+
+  describe('routingPreset cn-split', () => {
+    it('emits three remote binary rule-sets (ads + geosite-cn + geoip-cn)', () => {
+      const cfg = parse(buildSingboxJson([xrayEp], { routingPreset: 'cn-split' }));
+      const sets = cfg.route.rule_set;
+      expect(sets.map((s: any) => s.tag)).toEqual([
+        'geosite-category-ads-all',
+        'geosite-cn',
+        'geoip-cn',
+      ]);
+      for (const s of sets) {
+        expect(s.type).toBe('remote');
+        expect(s.format).toBe('binary');
+        expect(s.url).toMatch(
+          /^https:\/\/raw\.githubusercontent\.com\/SagerNet\/sing-(geosite|geoip)\/rule-set\/.+\.srs$/,
+        );
+        expect(s.download_detour).toBeUndefined();
+      }
+    });
+
+    it('rules: reject ads, direct private IPs and CN, final stays Auto', () => {
+      const cfg = parse(buildSingboxJson([xrayEp], { routingPreset: 'cn-split' }));
+      const rules = cfg.route.rules;
+      expect(rules).toHaveLength(3);
+      expect(rules[0]).toEqual({
+        rule_set: ['geosite-category-ads-all'],
+        action: 'reject',
+      });
+      expect(rules[1]).toEqual({
+        ip_is_private: true,
+        action: 'route',
+        outbound: 'direct',
+      });
+      expect(rules[2]).toEqual({
+        rule_set: ['geosite-cn', 'geoip-cn'],
+        action: 'route',
+        outbound: 'direct',
+      });
+      expect(cfg.route.final).toBe('Auto');
+    });
+
+    it('emits NO dns block (parity with ru-split) and no RU rule-sets', () => {
+      const out = buildSingboxJson([xrayEp], { routingPreset: 'cn-split' });
+      const cfg = parse(out);
+      expect((cfg as any).dns).toBeUndefined();
+      expect(out).not.toContain('geosite-category-ru');
+      expect(out).not.toContain('geoip-ru');
+    });
+  });
+
+  // ───── Byte-identity regression guards (H2) ─────
+
+  describe('routingPreset byte-identity (H2 guard)', () => {
+    it('proxy-all stays byte-identical to the default build', () => {
+      expect(buildSingboxJson([xrayEp], { routingPreset: 'proxy-all' })).toBe(
+        buildSingboxJson([xrayEp]),
+      );
+    });
+
+    it('ru-split output differs from cn-split', () => {
+      expect(buildSingboxJson([xrayEp], { routingPreset: 'ru-split' })).not.toBe(
+        buildSingboxJson([xrayEp], { routingPreset: 'cn-split' }),
+      );
+    });
+  });
 });

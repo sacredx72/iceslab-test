@@ -454,6 +454,7 @@ export default {
         contact: 'Контактная информация',
         devices: 'Устройства и теги',
         squads: 'Внутренние сквады',
+        routing: 'Маршрутизация',
       },
       username: 'Имя',
       usernameDesc: 'уникален, без пробелов',
@@ -479,6 +480,13 @@ export default {
         'Юзер сейчас в «All» И в других сквадах: профили могут считаться дважды в счётчиках. Сними «All» если хочешь только кастомный набор.',
       squadsEmptyFallbackHint:
         'Не выбран ни один сквад: при сохранении бэкенд автоматически добавит «All», чтобы подписка не оказалась пустой.',
+      routing: 'Переопределение маршрутизации',
+      routingDesc:
+        'Маршрутизация для этого пользователя в полноконфиговых форматах. Наследовать: брать настройку сквада или панели. Приоритетнее настройки сквада.',
+      routingInherit: 'Наследовать (сквад / панель)',
+      routingProxyAll: 'Весь трафик в тоннель',
+      routingRuSplit: 'RU-сплит (ru-split)',
+      routingCnSplit: 'CN-сплит (cn-split)',
       devicesTitle: 'Зарегистрированные устройства ({{count}})',
       devicesEmpty: 'Юзер ещё не подключался с HWID-aware клиента, либо лимит не задан.',
       deviceDelete: 'Сбросить слот, чтобы юзер мог подключиться с другого устройства',
@@ -544,6 +552,7 @@ export default {
       routingInherit: 'Наследовать (дефолт панели)',
       routingProxyAll: 'Проксировать всё',
       routingRuSplit: 'RU split (ru-split)',
+      routingCnSplit: 'CN split (cn-split)',
       hwidLimit: 'Лимит устройств HWID (дефолт сквада)',
       hwidLimitDesc: 'Дефолтный лимит устройств для членов без своего лимита. Пусто = нет. По сквадам выигрывает самый щедрый (max).',
       hwidLimitPlaceholder: 'Нет дефолта сквада',
@@ -631,7 +640,17 @@ export default {
       routingRuSplit: 'Умный сплит для РФ',
       routingRuSplitDesc:
         'Реклама и малварь в блок, российские сайты и локальные адреса напрямую, остальное через туннель.',
+      routingCnSplit: 'CN split (cn-split)',
+      routingCnSplitDesc:
+        'Реклама и малварь в блок, китайские сайты и локальные адреса напрямую, остальное через туннель. Чистый китайский DNS.',
       routingSaved: 'Пресет маршрутизации обновлён',
+      fragmentTitle: 'TLS-фрагментация',
+      fragmentDesc:
+        'Режет исходящий TLS-хендшейк, чтобы DPI по SNI не мог его чётко опознать. Только для формата Xray JSON.',
+      fragmentToggle: 'Фрагментировать ClientHello',
+      fragmentToggleDesc:
+        'Дайлит каждый сервер через fragment-outbound, который рубит хендшейк на куски. Помогает против DPI РФ/РКН.',
+      fragmentSaved: 'TLS-фрагментация обновлена',
       customRulesTitle: 'Кастомные правила маршрутизации (про)',
       customRulesDesc:
         'Сырые Xray routing-правила, применяются к форматам Xray JSON и XKeen ПЕРЕД пресетом. Для профи - оставь пустым, чтобы работал только пресет выше.',
@@ -640,6 +659,16 @@ export default {
         'JSON-массив Xray routing-rule объектов. Ссылайся на теги direct / block или прокси-тег. Имеют приоритет над пресетом.',
       customRulesInvalidJson: 'Невалидный JSON',
       customRulesNotArray: 'Должен быть JSON-массив объектов-правил',
+      domainListsTitle: 'Свои списки доменов',
+      domainListsDesc:
+        'Маршрутизация по доменам для форматов Xray JSON / XKeen и Clash, перед пресетом. Один домен на строку. Пусто: ничего не меняется. Блок приоритетнее direct и proxy.',
+      domainListsDirect: 'Напрямую (мимо тоннеля)',
+      domainListsDirectDesc:
+        'Эти домены идут напрямую. Можно с префиксами Xray (domain: / full: / regexp:); в Clash берётся чистый домен.',
+      domainListsProxy: 'Через прокси (в тоннель)',
+      domainListsProxyDesc: 'Эти домены принудительно идут через прокси.',
+      domainListsBlock: 'Блок (reject)',
+      domainListsBlockDesc: 'Эти домены блокируются.',
     },
   },
   regions: {

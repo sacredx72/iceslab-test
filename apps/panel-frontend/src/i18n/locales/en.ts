@@ -449,6 +449,7 @@ export default {
         contact: 'Contact info',
         devices: 'Devices & tags',
         squads: 'Internal squads',
+        routing: 'Routing',
       },
       username: 'Username',
       usernameDesc: 'unique, no spaces',
@@ -474,6 +475,13 @@ export default {
         'User is in "All" AND another squad: profiles may double-count on dashboards. Uncheck "All" if you want only the custom set.',
       squadsEmptyFallbackHint:
         'No squad picked: the backend will auto-attach "All" on save so the subscription is not empty.',
+      routing: 'Routing override',
+      routingDesc:
+        'Per-user routing for full-config formats. Inherit = use the squad or panel-wide setting. Wins over the squad override.',
+      routingInherit: 'Inherit (squad / panel default)',
+      routingProxyAll: 'Proxy all',
+      routingRuSplit: 'RU split (ru-split)',
+      routingCnSplit: 'CN split (cn-split)',
       devicesTitle: 'Registered devices ({{count}})',
       devicesEmpty: 'No HWID-aware client has connected yet, or no limit is set.',
       deviceDelete: 'Free this slot - user can log in from a different device',
@@ -539,6 +547,7 @@ export default {
       routingInherit: 'Inherit (panel default)',
       routingProxyAll: 'Proxy all',
       routingRuSplit: 'RU split (ru-split)',
+      routingCnSplit: 'CN split (cn-split)',
       hwidLimit: 'HWID device limit (squad default)',
       hwidLimitDesc: 'Default device cap for members without their own limit. Empty = none. Across squads the most-permissive (max) wins.',
       hwidLimitPlaceholder: 'No squad default',
@@ -626,7 +635,17 @@ export default {
       routingRuSplit: 'Smart RU split',
       routingRuSplitDesc:
         'Ads and malware blocked, Russian sites and private ranges go direct, everything else through the tunnel.',
+      routingCnSplit: 'CN split (cn-split)',
+      routingCnSplitDesc:
+        'Ads and malware blocked, China sites and private ranges go direct, everything else through the tunnel. Clean China DNS.',
       routingSaved: 'Routing preset updated',
+      fragmentTitle: 'TLS fragment',
+      fragmentDesc:
+        'Splits the outgoing TLS handshake so SNI-based DPI cannot cleanly match it. Xray JSON format only.',
+      fragmentToggle: 'Fragment the ClientHello',
+      fragmentToggleDesc:
+        'Dials each server through a fragment outbound that chops the handshake into pieces. Helps against RU/RKN DPI.',
+      fragmentSaved: 'TLS fragment updated',
       customRulesTitle: 'Custom routing rules (advanced)',
       customRulesDesc:
         'Raw Xray routing rules, applied to the Xray JSON and XKeen formats ahead of the preset. For power users - leave empty to use only the preset above.',
@@ -635,6 +654,16 @@ export default {
         'A JSON array of Xray routing-rule objects. Reference the tags direct / block or a proxy tag. They take precedence over the preset.',
       customRulesInvalidJson: 'Invalid JSON',
       customRulesNotArray: 'Must be a JSON array of rule objects',
+      domainListsTitle: 'Custom domain lists',
+      domainListsDesc:
+        'Per-domain routing for the Xray JSON / XKeen and Clash formats, ahead of the preset. One domain per line. Empty = no effect. Block wins over direct and proxy.',
+      domainListsDirect: 'Direct (bypass the tunnel)',
+      domainListsDirectDesc:
+        'These domains go direct. Xray prefixes (domain: / full: / regexp:) are allowed; Clash uses the bare domain.',
+      domainListsProxy: 'Proxy (through the tunnel)',
+      domainListsProxyDesc: 'These domains are forced through the proxy.',
+      domainListsBlock: 'Block (reject)',
+      domainListsBlockDesc: 'These domains are blocked.',
     },
   },
   regions: {

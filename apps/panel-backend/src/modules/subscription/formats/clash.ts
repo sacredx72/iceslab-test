@@ -30,10 +30,11 @@ function yamlString(value: string): string {
 }
 
 /**
- * Routing Templates (R1c) - `routingPreset: 'ru-split'` prepends split-routing
- * rules ahead of the MATCH catch-all (ads -> REJECT, RU domains / RU IPs /
- * private ranges -> DIRECT) and emits a geo-database block so mihomo can
- * fetch geosite.dat / country.mmdb itself:
+ * Routing Templates (R1c + H2) - a split `routingPreset` prepends split-routing
+ * rules ahead of the MATCH catch-all (ads -> REJECT, region domains / region
+ * IPs / private ranges -> DIRECT) and emits a geo-database block so mihomo can
+ * fetch geosite.dat / country.mmdb itself. `ru-split` uses RU categories +
+ * Yandex DNS; `cn-split` uses GEOSITE,cn / GEOIP,CN + AliDNS 223.5.5.5:
  *
  *   - `geox-url` points at the testingcf.jsdelivr.net mirror of
  *     MetaCubeX/meta-rules-dat (the docs' own example) because the default
@@ -49,9 +50,23 @@ function yamlString(value: string): string {
  */
 export interface ClashBuildOpts {
   routingPreset?: RoutingPresetId;
+  /**
+   * R3 - operator-defined custom domain lists (direct/proxy/block). Each domain
+   * becomes a `DOMAIN-SUFFIX` rule emitted at the head of the `rules:` section
+   * (before any ru-split lines and the MATCH catch-all). xray geosite-style
+   * prefixes (domain:/full:/regexp:/keyword:) are stripped since Clash does not
+   * understand them. Empty/undefined = none = byte-identical output.
+   */
+  customDomainLists?: { direct: string[]; proxy: string[]; block: string[] };
 }
 
-const RU_SPLIT_GEO_LINES: readonly string[] = [
+// Geo-database block (shared by every split preset). The testingcf.jsdelivr.net
+// mirror of MetaCubeX/meta-rules-dat carries both `cn` and `ru` geo data, so
+// this block is preset-independent. NOTE (H2): jsdelivr CDN reachability inside
+// mainland China is variable (a different problem than RU's GitHub block), so
+// the CN geo-db fetch source may need field validation; if so it is a one-line
+// URL swap here, not a redesign.
+const SPLIT_GEO_LINES: readonly string[] = [
   'geo-auto-update: true',
   'geo-update-interval: 72',
   'geox-url:',
@@ -93,6 +108,34 @@ const RU_SPLIT_DNS_LINES: readonly string[] = [
   '',
 ];
 
+/**
+ * Split DNS (H2) - the China mirror of RU_SPLIT_DNS_LINES. China domains are
+ * answered by AliDNS (223.5.5.5) via nameserver-policy so CN CDNs return
+ * geo-correct IPs; the bootstrap / proxy-server nameservers swap Yandex for
+ * AliDNS. The DoH `nameserver` block and the fake-ip block stay identical.
+ */
+const CN_SPLIT_DNS_LINES: readonly string[] = [
+  'dns:',
+  '  enable: true',
+  '  enhanced-mode: fake-ip',
+  '  fake-ip-range: 198.18.0.1/16',
+  '  fake-ip-filter:',
+  '    - "*.lan"',
+  '    - "+.local"',
+  '  default-nameserver:',
+  '    - 223.5.5.5',
+  '    - 1.1.1.1',
+  '  proxy-server-nameserver:',
+  '    - 223.5.5.5',
+  '    - 1.1.1.1',
+  '  nameserver:',
+  '    - https://1.1.1.1/dns-query',
+  '    - https://dns.google/dns-query',
+  '  nameserver-policy:',
+  '    "geosite:cn": 223.5.5.5',
+  '',
+];
+
 const RU_SPLIT_RULE_LINES: readonly string[] = [
   '  - GEOSITE,category-ads-all,REJECT',
   '  - GEOSITE,category-ru,DIRECT',
@@ -108,11 +151,45 @@ const RU_SPLIT_RULE_LINES: readonly string[] = [
   '  - GEOIP,RU,DIRECT',
 ];
 
+// H2 - the China mirror of RU_SPLIT_RULE_LINES. The private-CIDR block is
+// verbatim; only the geo lines change (one GEOSITE,cn instead of the two RU
+// categories, and GEOIP,CN instead of GEOIP,RU). GEOIP,CN stays last and
+// without `no-resolve`: it is the resolve-then-decide fallback for a domain
+// that missed every GEOSITE rule.
+const CN_SPLIT_RULE_LINES: readonly string[] = [
+  '  - GEOSITE,category-ads-all,REJECT',
+  '  - GEOSITE,cn,DIRECT',
+  '  - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve',
+  '  - IP-CIDR,172.16.0.0/12,DIRECT,no-resolve',
+  '  - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve',
+  '  - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve',
+  '  - IP-CIDR,169.254.0.0/16,DIRECT,no-resolve',
+  '  - IP-CIDR6,fc00::/7,DIRECT,no-resolve',
+  '  - IP-CIDR6,fe80::/10,DIRECT,no-resolve',
+  '  - IP-CIDR6,::1/128,DIRECT,no-resolve',
+  '  - GEOIP,CN,DIRECT',
+];
+
 export function buildClashYaml(
   endpoints: SubscriptionEndpoint[],
   buildOpts: ClashBuildOpts = {},
 ): string {
-  const ruSplit = (buildOpts.routingPreset ?? 'proxy-all') === 'ru-split';
+  // Routing preset (R1c + H2). Each split preset selects its own DNS + rule
+  // lines (the geo-db block is shared); proxy-all leaves them null so the
+  // output stays byte-identical to pre-R1 builds.
+  const preset = buildOpts.routingPreset ?? 'proxy-all';
+  const splitDnsLines =
+    preset === 'ru-split'
+      ? RU_SPLIT_DNS_LINES
+      : preset === 'cn-split'
+        ? CN_SPLIT_DNS_LINES
+        : null;
+  const splitRuleLines =
+    preset === 'ru-split'
+      ? RU_SPLIT_RULE_LINES
+      : preset === 'cn-split'
+        ? CN_SPLIT_RULE_LINES
+        : null;
   const proxies: string[] = [];
   const proxyNames: string[] = [];
 
@@ -238,9 +315,9 @@ export function buildClashYaml(
   }
 
   const lines: string[] = [];
-  if (ruSplit) {
-    lines.push(...RU_SPLIT_GEO_LINES);
-    lines.push(...RU_SPLIT_DNS_LINES);
+  if (splitRuleLines) {
+    lines.push(...SPLIT_GEO_LINES);
+    lines.push(...splitDnsLines!);
   }
   lines.push('proxies:');
   if (proxies.length === 0) {
@@ -265,9 +342,30 @@ export function buildClashYaml(
   }
   lines.push('');
 
+  // R3 - operator custom domain lists -> DOMAIN-SUFFIX rules. Order
+  // block -> direct -> proxy so a block listing wins over a direct/proxy
+  // listing of an overlapping domain. Strip xray geosite-style prefixes Clash
+  // cannot parse. The proxy bucket targets the existing `Auto` proxy-group, so
+  // it is only emitted when at least one proxy exists.
+  const cdl = buildOpts.customDomainLists;
+  const stripPfx = (d: string): string => d.replace(/^(domain|full|regexp|keyword):/, '');
+  const customDomainLines: string[] = cdl
+    ? [
+        ...cdl.block.map((d) => `  - DOMAIN-SUFFIX,${stripPfx(d)},REJECT`),
+        ...cdl.direct.map((d) => `  - DOMAIN-SUFFIX,${stripPfx(d)},DIRECT`),
+        ...(proxyNames.length > 0
+          ? cdl.proxy.map((d) => `  - DOMAIN-SUFFIX,${stripPfx(d)},Auto`)
+          : []),
+      ]
+    : [];
+
   lines.push('rules:');
-  if (ruSplit) {
-    lines.push(...RU_SPLIT_RULE_LINES);
+  // Custom-domain lines first (highest precedence), then the split-preset
+  // lines, then the MATCH catch-all. When the lists are empty this spread is a
+  // no-op.
+  lines.push(...customDomainLines);
+  if (splitRuleLines) {
+    lines.push(...splitRuleLines);
   }
   lines.push(proxyNames.length > 0 ? '  - MATCH,Auto' : '  - MATCH,DIRECT');
 

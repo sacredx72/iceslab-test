@@ -190,6 +190,148 @@ describe('buildXrayJson', () => {
     });
   });
 
+  // Routing Templates (H2) - cn-split, the China-direct mirror of ru-split.
+  describe('routingPreset cn-split', () => {
+    it('prepends block/direct rules (one CN domain category) ahead of the catch-all', () => {
+      const cfg = parse(buildXrayJson([xrayEp], { routingPreset: 'cn-split' }));
+      const rules = cfg.routing.rules;
+      expect(rules).toHaveLength(4);
+      expect(rules[0].domain).toEqual(['geosite:category-ads-all']);
+      expect(rules[0].outboundTag).toBe('block');
+      // China is one comprehensive category, so a single domain rule (not two).
+      expect(rules[1].domain).toEqual(['geosite:cn']);
+      expect(rules[1].outboundTag).toBe('direct');
+      expect(rules[2].ip).toEqual(['geoip:private', 'geoip:cn']);
+      expect(rules[2].outboundTag).toBe('direct');
+      // Catch-all stays last so unmatched traffic still tunnels.
+      expect(rules[3].network).toBe('tcp,udp');
+      expect(rules[3].outboundTag).toBe('eu-1-xray');
+    });
+
+    it('switches domainStrategy to IPIfNonMatch', () => {
+      const cfg = parse(buildXrayJson([xrayEp], { routingPreset: 'cn-split' }));
+      expect(cfg.routing.domainStrategy).toBe('IPIfNonMatch');
+    });
+
+    it('adds AliDNS split DNS (223.5.5.5 scoped to geosite:cn, no fallback)', () => {
+      const cfg = parse(buildXrayJson([xrayEp], { routingPreset: 'cn-split' }));
+      expect(cfg.dns.servers).toHaveLength(2);
+      expect(cfg.dns.servers[0]).toEqual({
+        address: '223.5.5.5',
+        domains: ['geosite:cn'],
+        skipFallback: true,
+      });
+      expect(cfg.dns.servers[1]).toBe('8.8.8.8');
+    });
+
+    it('does not leak RU categories or the Yandex resolver', () => {
+      const out = buildXrayJson([xrayEp], { routingPreset: 'cn-split' });
+      expect(out).not.toContain('category-ru');
+      expect(out).not.toContain('geoip:ru');
+      expect(out).not.toContain('77.88.8.8');
+    });
+  });
+
+  // Byte-identity regression guards: adding cn-split must not perturb the
+  // existing presets.
+  describe('routingPreset byte-identity (H2 guard)', () => {
+    it('proxy-all stays byte-identical to the default build', () => {
+      expect(buildXrayJson([xrayEp], { routingPreset: 'proxy-all' })).toBe(
+        buildXrayJson([xrayEp]),
+      );
+    });
+
+    it('ru-split output is independent of cn-split (different bytes)', () => {
+      expect(buildXrayJson([xrayEp], { routingPreset: 'ru-split' })).not.toBe(
+        buildXrayJson([xrayEp], { routingPreset: 'cn-split' }),
+      );
+    });
+  });
+
+  // TLS-fragment.
+  describe('tlsFragment', () => {
+    it('OFF (default / explicit false) is byte-identical to current output', () => {
+      expect(buildXrayJson([xrayEp], { tlsFragment: false })).toBe(
+        buildXrayJson([xrayEp]),
+      );
+      const cfg = parse(buildXrayJson([xrayEp]));
+      // No fragment outbound, no dialerProxy on the proxy outbound.
+      expect(cfg.outbounds.find((o: any) => o.tag === 'fragment')).toBeUndefined();
+      const v = cfg.outbounds.find((o: any) => o.protocol === 'vless');
+      expect(v.streamSettings.sockopt).toBeUndefined();
+    });
+
+    it('ON emits a freedom outbound tagged "fragment" with the fragment object', () => {
+      const cfg = parse(buildXrayJson([xrayEp], { tlsFragment: true }));
+      const frag = cfg.outbounds.find((o: any) => o.tag === 'fragment');
+      expect(frag).toBeDefined();
+      expect(frag.protocol).toBe('freedom');
+      expect(frag.settings.fragment).toEqual({
+        packets: 'tlshello',
+        length: '100-200',
+        interval: '10-20',
+      });
+    });
+
+    it('ON sets sockopt.dialerProxy="fragment" on the proxy outbound (existing stream fields preserved)', () => {
+      const cfg = parse(buildXrayJson([xrayEp], { tlsFragment: true }));
+      const v = cfg.outbounds.find((o: any) => o.protocol === 'vless');
+      expect(v.streamSettings.sockopt.dialerProxy).toBe('fragment');
+      // The REALITY stream settings are untouched.
+      expect(v.streamSettings.security).toBe('reality');
+      expect(v.streamSettings.realitySettings.serverName).toBe('www.cloudflare.com');
+      // The fragment outbound itself carries no dialerProxy (it IS the dialer).
+      const frag = cfg.outbounds.find((o: any) => o.tag === 'fragment');
+      expect(frag.streamSettings).toBeUndefined();
+    });
+
+    it('ON does NOT touch the direct/block outbounds', () => {
+      const cfg = parse(buildXrayJson([xrayEp], { tlsFragment: true }));
+      const direct = cfg.outbounds.find((o: any) => o.tag === 'direct');
+      const block = cfg.outbounds.find((o: any) => o.tag === 'block');
+      expect(direct.streamSettings).toBeUndefined();
+      expect(block.streamSettings).toBeUndefined();
+    });
+
+    it('a node named "fragment" does not collide (its proxy tag is "fragment-xray", dialer stays "fragment")', () => {
+      const named: SubscriptionEndpoint = { ...xrayEp, nodeName: 'fragment' };
+      const cfg = parse(buildXrayJson([named], { tlsFragment: true }));
+      const v = cfg.outbounds.find((o: any) => o.protocol === 'vless');
+      expect(v.tag).toBe('fragment-xray');
+      // No proxy tag equals "fragment", so the dialer keeps the canonical tag.
+      expect(v.streamSettings.sockopt.dialerProxy).toBe('fragment');
+      const frag = cfg.outbounds.find((o: any) => o.tag === 'fragment');
+      expect(frag).toBeDefined();
+      expect(frag.protocol).toBe('freedom');
+      // Every outbound tag stays unique.
+      const tags = cfg.outbounds.map((o: any) => o.tag);
+      expect(new Set(tags).size).toBe(tags.length);
+    });
+
+    it('no xray endpoints: nothing fragment-related is emitted', () => {
+      const cfg = parse(buildXrayJson([hysteriaEp], { tlsFragment: true }));
+      expect(cfg.outbounds.find((o: any) => o.tag === 'fragment')).toBeUndefined();
+    });
+
+    it('composes with the ru-split routing preset (fragment outbound + split rules, unique tags)', () => {
+      const cfg = parse(
+        buildXrayJson([xrayEp], { tlsFragment: true, routingPreset: 'ru-split' }),
+      );
+      // Fragment outbound present + proxy dials through it.
+      const frag = cfg.outbounds.find((o: any) => o.tag === 'fragment');
+      expect(frag).toBeDefined();
+      const v = cfg.outbounds.find((o: any) => o.protocol === 'vless');
+      expect(v.streamSettings.sockopt.dialerProxy).toBe('fragment');
+      // ru-split rules + split DNS still present.
+      expect(cfg.routing.domainStrategy).toBe('IPIfNonMatch');
+      expect(cfg.routing.rules[0].outboundTag).toBe('block');
+      expect(cfg.dns.servers).toHaveLength(2);
+      // Every outbound tag is unique.
+      const tags = cfg.outbounds.map((o: any) => o.tag);
+      expect(new Set(tags).size).toBe(tags.length);
+    });
+  });
+
   // XKeen / router target (?format=xkeen).
   describe('forRouter (xkeen)', () => {
     it('omits log and the client inbound, keeps outbounds + routing', () => {
@@ -231,6 +373,95 @@ describe('buildXrayJson', () => {
 
     it('empty / absent custom rules keep output byte-identical', () => {
       expect(buildXrayJson([xrayEp], { customRules: [] })).toBe(buildXrayJson([xrayEp]));
+    });
+  });
+
+  // R3 - operator custom domain lists.
+  describe('customDomainLists (R3)', () => {
+    it('empty lists keep output byte-identical to no lists', () => {
+      expect(
+        buildXrayJson([xrayEp], { customDomainLists: { direct: [], proxy: [], block: [] } }),
+      ).toBe(buildXrayJson([xrayEp]));
+    });
+
+    it('undefined lists keep output byte-identical', () => {
+      expect(buildXrayJson([xrayEp], { customDomainLists: undefined })).toBe(
+        buildXrayJson([xrayEp]),
+      );
+    });
+
+    it('emits one field rule per non-empty bucket, ordered block -> direct -> proxy', () => {
+      const cfg = parse(
+        buildXrayJson([xrayEp], {
+          customDomainLists: {
+            block: ['ads.example.com'],
+            direct: ['example.ru', 'domain:gosuslugi.ru'],
+            proxy: ['youtube.com'],
+          },
+        }),
+      );
+      const rules = cfg.routing.rules;
+      // block first, then direct, then proxy, then the catch-all.
+      expect(rules[0]).toEqual({ type: 'field', domain: ['ads.example.com'], outboundTag: 'block' });
+      expect(rules[1]).toEqual({
+        type: 'field',
+        domain: ['example.ru', 'domain:gosuslugi.ru'],
+        outboundTag: 'direct',
+      });
+      expect(rules[2]).toEqual({ type: 'field', domain: ['youtube.com'], outboundTag: 'eu-1-xray' });
+      // Catch-all stays last.
+      expect(rules[rules.length - 1].outboundTag).toBe('eu-1-xray');
+      expect(rules[rules.length - 1].network).toBe('tcp,udp');
+    });
+
+    it('only emits buckets that have entries (proxy-only)', () => {
+      const cfg = parse(
+        buildXrayJson([xrayEp], {
+          customDomainLists: { direct: [], proxy: ['youtube.com'], block: [] },
+        }),
+      );
+      const rules = cfg.routing.rules;
+      // proxy rule then catch-all (no block/direct rules).
+      expect(rules).toHaveLength(2);
+      expect(rules[0]).toEqual({ type: 'field', domain: ['youtube.com'], outboundTag: 'eu-1-xray' });
+    });
+
+    it('drops the proxy bucket when no xray endpoint exists (no valid proxy tag)', () => {
+      const cfg = parse(
+        buildXrayJson([hysteriaEp], {
+          customDomainLists: { direct: ['example.ru'], proxy: ['youtube.com'], block: [] },
+        }),
+      );
+      const rules = cfg.routing.rules;
+      // direct rule survives; proxy rule is dropped (no proxy tag to target).
+      expect(rules[0]).toEqual({ type: 'field', domain: ['example.ru'], outboundTag: 'direct' });
+      expect(JSON.stringify(rules)).not.toContain('youtube.com');
+    });
+
+    it('slots between raw custom rules and the preset rules (raw > lists > preset)', () => {
+      const custom = [{ type: 'field', domain: ['my.corp'], outboundTag: 'direct' }];
+      const cfg = parse(
+        buildXrayJson([xrayEp], {
+          customRules: custom,
+          customDomainLists: { direct: ['example.ru'], proxy: [], block: [] },
+          routingPreset: 'ru-split',
+        }),
+      );
+      const rules = cfg.routing.rules;
+      // Order: raw custom rule, then domain-list rule, then ru-split block, then catch-all.
+      expect(rules[0]).toEqual(custom[0]);
+      expect(rules[1]).toEqual({ type: 'field', domain: ['example.ru'], outboundTag: 'direct' });
+      expect(rules[2].domain).toEqual(['geosite:category-ads-all']);
+      expect(rules[rules.length - 1].outboundTag).toBe('eu-1-xray');
+    });
+
+    it('does not change domainStrategy for proxy-all (domain rules work under AsIs)', () => {
+      const cfg = parse(
+        buildXrayJson([xrayEp], {
+          customDomainLists: { direct: ['example.ru'], proxy: [], block: [] },
+        }),
+      );
+      expect(cfg.routing.domainStrategy).toBe('AsIs');
     });
   });
 });

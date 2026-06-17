@@ -31,15 +31,29 @@ import type { SubscriptionEndpoint } from '../subscription.formats.js';
  * outbound wins" routing rule for back-compat.
  */
 /**
- * Routing Templates (R1a) - `routingPreset: 'ru-split'` prepends split-routing
- * rules ahead of the catch-all: ads/malware -> block, RU domains
- * (geosite:category-ru + category-gov-ru) and RU/private IPs -> direct,
- * everything else falls through to the tunnel. Uses the geosite:/geoip:
- * databases that ship inside every xray client install, so no extra files
- * are needed. `domainStrategy` switches to IPIfNonMatch so domains that miss
- * every domain rule get a second, IP-based pass (otherwise geoip:ru never
- * matches a domain-typed destination). Default 'proxy-all' keeps the output
- * byte-identical to pre-R1 builds.
+ * TLS-fragment - when `tlsFragment` is on we emit a `freedom` outbound carrying
+ * a `fragment` object and dial every proxy outbound THROUGH it via
+ * `streamSettings.sockopt.dialerProxy`. This splits the client's outgoing
+ * ClientHello so SNI-based DPI (RU TSPU / RKN) cannot cleanly match the
+ * handshake. Defaults mirror the upstream-verified shape:
+ * packets="tlshello" (fragments the TLS handshake), length="100-200",
+ * interval="10-20". The fragment outbound's tag MUST exactly equal the
+ * dialerProxy value; we pick a tag that cannot collide with any proxy/direct/
+ * block tag. When off, the output stays byte-identical to pre-fragment builds.
+ */
+/**
+ * Routing Templates (R1a + H2) - a split `routingPreset` prepends split-routing
+ * rules ahead of the catch-all: ads/malware -> block, region domains + region/
+ * private IPs -> direct, everything else falls through to the tunnel.
+ *   - `ru-split`: RU domains (geosite:category-ru + category-gov-ru) + geoip:ru.
+ *   - `cn-split`: China domains (geosite:cn) + geoip:cn (single comprehensive
+ *     category, so one domain rule not two), clean DNS via AliDNS 223.5.5.5.
+ * Uses the geosite:/geoip: databases that ship inside every xray client
+ * install, so no extra files are needed. `domainStrategy` switches to
+ * IPIfNonMatch so domains that miss every domain rule get a second, IP-based
+ * pass (otherwise geoip:ru / geoip:cn never matches a domain-typed
+ * destination). Default 'proxy-all' keeps the output byte-identical to pre-R1
+ * builds.
  */
 export interface XrayJsonBuildOpts {
   bundle?: 'flat' | 'balancer';
@@ -63,7 +77,30 @@ export interface XrayJsonBuildOpts {
    * (`direct`, `block`, or a proxy tag). Empty/undefined = none.
    */
   customRules?: Record<string, unknown>[];
+  /**
+   * R3 - operator-defined custom domain lists (direct/proxy/block). Each
+   * non-empty bucket becomes one field rule (domain array -> outboundTag),
+   * slotted between the raw `customRules` and the preset rules. block wins over
+   * direct/proxy on an overlapping domain (block rule is emitted first).
+   * Empty/undefined = none = byte-identical output.
+   */
+  customDomainLists?: { direct: string[]; proxy: string[]; block: string[] };
+  /**
+   * TLS-fragment - when true, append a `freedom` outbound carrying a `fragment`
+   * object and set `sockopt.dialerProxy` on every proxy outbound so the
+   * ClientHello is split before it leaves the client. Default false keeps the
+   * output byte-identical. Xray JSON only (the technique is Xray-native).
+   */
+  tlsFragment?: boolean;
 }
+
+// TLS-fragment defaults (upstream-verified). `tlshello` fragments the TLS
+// handshake itself, which is what beats SNI-DPI.
+const TLS_FRAGMENT_SETTINGS: Record<string, string> = {
+  packets: 'tlshello',
+  length: '100-200',
+  interval: '10-20',
+};
 
 const RU_SPLIT_RULES: ReadonlyArray<Record<string, unknown>> = [
   { type: 'field', domain: ['geosite:category-ads-all'], outboundTag: 'block' },
@@ -95,6 +132,38 @@ const RU_SPLIT_DNS: Record<string, unknown> = {
   ],
 };
 
+/**
+ * Routing Templates (H2) - `cn-split` is the China-direct mirror of `ru-split`.
+ * China is comprehensively covered by the single `geosite:cn` / `geoip:cn`
+ * category (no second gov category like RU), so one domain rule, not two.
+ * Ads-block, private-range-direct and the catch-all stay identical in shape.
+ */
+const CN_SPLIT_RULES: ReadonlyArray<Record<string, unknown>> = [
+  { type: 'field', domain: ['geosite:category-ads-all'], outboundTag: 'block' },
+  { type: 'field', domain: ['geosite:cn'], outboundTag: 'direct' },
+  { type: 'field', ip: ['geoip:private', 'geoip:cn'], outboundTag: 'direct' },
+];
+
+/**
+ * Split DNS (H2). China domains resolve via AliDNS (223.5.5.5) so CN CDNs
+ * return geo-correct answers; `skipFallback` keeps those queries off the
+ * general resolver. Everything else asks 8.8.8.8. Xray's built-in DNS obeys
+ * the routing table above, so the 223.5.5.5 query itself rides direct
+ * (matches geoip:cn) while 8.8.8.8 rides the tunnel - no plaintext foreign
+ * DNS on the CN wire. Plain-IP server dodges the DoH bootstrap problem (the
+ * same rationale as the Yandex IP in RU_SPLIT_DNS).
+ */
+const CN_SPLIT_DNS: Record<string, unknown> = {
+  servers: [
+    {
+      address: '223.5.5.5',
+      domains: ['geosite:cn'],
+      skipFallback: true,
+    },
+    '8.8.8.8',
+  ],
+};
+
 export function buildXrayJson(
   endpoints: SubscriptionEndpoint[],
   opts: XrayJsonBuildOpts = {},
@@ -102,7 +171,35 @@ export function buildXrayJson(
   const xrayEps = endpoints.filter((e) => e.protocol === 'xray');
   const proxyTags: string[] = [];
   const bundle = opts.bundle ?? 'flat';
-  const ruSplit = (opts.routingPreset ?? 'proxy-all') === 'ru-split';
+  // Routing preset (R1a + H2). Each split preset selects its own rule array +
+  // split-DNS block; proxy-all leaves both null so the output stays
+  // byte-identical to pre-R1 builds.
+  const preset = opts.routingPreset ?? 'proxy-all';
+  const splitRules =
+    preset === 'ru-split'
+      ? RU_SPLIT_RULES
+      : preset === 'cn-split'
+        ? CN_SPLIT_RULES
+        : null;
+  const splitDns =
+    preset === 'ru-split'
+      ? RU_SPLIT_DNS
+      : preset === 'cn-split'
+        ? CN_SPLIT_DNS
+        : null;
+
+  // TLS-fragment - the fragment outbound's tag must not collide with any proxy
+  // (`${nodeName}-xray`), `direct`, or `block` tag, and must exactly equal the
+  // dialerProxy value we stamp onto each proxy outbound. Prefer "fragment";
+  // fall back to "tls-fragment" if some emitted outbound already owns the
+  // "fragment" tag (defensive - keeps the guarantee even if the proxy tag
+  // scheme ever changes to not carry the `-xray` suffix).
+  const tlsFragment = opts.tlsFragment === true && xrayEps.length > 0;
+  const reservedTags = new Set<string>(['direct', 'block']);
+  for (const e of xrayEps) {
+    if (e.protocol === 'xray') reservedTags.add(`${e.nodeName}-xray`);
+  }
+  const fragmentTag = reservedTags.has('fragment') ? 'tls-fragment' : 'fragment';
 
   const proxyOutbounds = xrayEps.map((e) => {
     if (e.protocol !== 'xray') throw new Error('unreachable'); // narrowing
@@ -179,6 +276,14 @@ export function buildXrayJson(
       streamSettings.kcpSettings = { header: { type: 'none' } };
     }
 
+    // TLS-fragment - dial this proxy THROUGH the fragment freedom outbound.
+    // Merge into any existing sockopt so we never clobber other fields.
+    if (tlsFragment) {
+      const existingSockopt =
+        (streamSettings.sockopt as Record<string, unknown> | undefined) ?? {};
+      streamSettings.sockopt = { ...existingSockopt, dialerProxy: fragmentTag };
+    }
+
     return {
       tag,
       protocol: sub === 'trojan' ? 'trojan' : sub === 'vmess' ? 'vmess' : 'vless',
@@ -203,11 +308,26 @@ export function buildXrayJson(
     ? [{ tag: 'balancer-auto', selector: proxyTags, strategy: { type: 'leastPing' } }]
     : undefined;
 
+  // R3 - operator custom domain lists -> one field rule per non-empty bucket.
+  // Order block -> direct -> proxy so a block listing wins over a direct/proxy
+  // listing of an overlapping domain. The proxy bucket needs an actual proxy
+  // outbound to target; with no xray endpoints it is dropped (no valid tag).
+  const cdl = opts.customDomainLists;
+  const customDomainRules: Record<string, unknown>[] = cdl
+    ? [
+        ...(cdl.block.length ? [{ type: 'field', domain: cdl.block, outboundTag: 'block' }] : []),
+        ...(cdl.direct.length ? [{ type: 'field', domain: cdl.direct, outboundTag: 'direct' }] : []),
+        ...(cdl.proxy.length && proxyTags.length > 0
+          ? [{ type: 'field', domain: cdl.proxy, outboundTag: proxyTags[0] }]
+          : []),
+      ]
+    : [];
+
   // forRouter (XKeen): drop log + the client SOCKS inbound; the router owns
-  // those. Keep dns (ru-split), outbounds and routing.
+  // those. Keep dns (split presets), outbounds and routing.
   const config: Record<string, unknown> = {
     ...(opts.forRouter ? {} : { log: { loglevel: 'warning' } }),
-    ...(ruSplit ? { dns: RU_SPLIT_DNS } : {}),
+    ...(splitDns ? { dns: splitDns } : {}),
     ...(opts.forRouter
       ? {}
       : {
@@ -225,14 +345,30 @@ export function buildXrayJson(
       ...proxyOutbounds,
       { tag: 'direct', protocol: 'freedom' },
       { tag: 'block', protocol: 'blackhole' },
+      // TLS-fragment - the freedom dialer the proxy outbounds tunnel through.
+      // Only appended when on, so the off path stays byte-identical.
+      ...(tlsFragment
+        ? [
+            {
+              tag: fragmentTag,
+              protocol: 'freedom',
+              settings: { fragment: { ...TLS_FRAGMENT_SETTINGS } },
+            },
+          ]
+        : []),
     ],
     routing: {
-      domainStrategy: ruSplit ? 'IPIfNonMatch' : 'AsIs',
+      // Split presets need IPIfNonMatch so a domain-typed destination that
+      // missed every domain rule gets a second, IP-based pass (otherwise
+      // geoip:ru / geoip:cn never matches). proxy-all keeps AsIs.
+      domainStrategy: splitRules ? 'IPIfNonMatch' : 'AsIs',
       ...(balancers ? { balancers } : {}),
       rules: [
         // R3-b custom rules win over presets + catch-all.
         ...(opts.customRules ?? []),
-        ...(ruSplit ? RU_SPLIT_RULES : []),
+        // R3 custom domain lists sit below raw rules, above the preset rules.
+        ...customDomainRules,
+        ...(splitRules ?? []),
         balancerActive
           ? { type: 'field', network: 'tcp,udp', balancerTag: 'balancer-auto' }
           : proxyTags.length > 0

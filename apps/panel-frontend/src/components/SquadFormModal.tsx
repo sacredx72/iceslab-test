@@ -314,6 +314,7 @@ export function SquadFormModal({
               { value: '', label: t('squads.form.routingInherit') },
               { value: 'proxy-all', label: t('squads.form.routingProxyAll') },
               { value: 'ru-split', label: t('squads.form.routingRuSplit') },
+              { value: 'cn-split', label: t('squads.form.routingCnSplit') },
             ]}
             allowDeselect={false}
             {...form.getInputProps('routingPreset')}
