@@ -387,6 +387,14 @@ type xrayInboundCfgWire struct {
 	Path               string   `json:"path,omitempty"`
 	Host               string   `json:"host,omitempty"`
 	ServiceName        string   `json:"serviceName,omitempty"`
+	// B3: extra xray knobs. Defaults (0 / "" / false) render identically to
+	// pre-B3 configs, so omitting them keeps existing nodes byte-stable.
+	RealityXver         int    `json:"realityXver,omitempty"`
+	RealityMaxTimeDiff  int    `json:"realityMaxTimeDiff,omitempty"`
+	TLSRejectUnknownSni bool   `json:"tlsRejectUnknownSni,omitempty"`
+	XhttpMode           string `json:"xhttpMode,omitempty"`
+	XhttpPaddingBytes   string `json:"xhttpPaddingBytes,omitempty"`
+	GrpcMultiMode       bool   `json:"grpcMultiMode,omitempty"`
 	// Slice 24c part 3 — controls inbound `protocol` (vless vs trojan) and
 	// `settings.clients` shape. Empty/missing → vless (back-compat).
 	Subprotocol string `json:"subprotocol,omitempty"`
@@ -453,6 +461,14 @@ func (a *Adapter) ApplyInbound(port int, rawCfg json.RawMessage) error {
 		TLSCert:            wire.TLSCert,
 		TLSKey:             wire.TLSKey,
 		RealityMode:        wire.RealityMode,
+		// B3: extra xray knobs (REALITY xver/maxTimeDiff, TLS rejectUnknownSni,
+		// XHTTP mode/padding, gRPC multiMode). Zero-values render as before.
+		RealityXver:         wire.RealityXver,
+		RealityMaxTimeDiff:  wire.RealityMaxTimeDiff,
+		TLSRejectUnknownSni: wire.TLSRejectUnknownSni,
+		XhttpMode:           wire.XhttpMode,
+		XhttpPaddingBytes:   wire.XhttpPaddingBytes,
+		GrpcMultiMode:       wire.GrpcMultiMode,
 	}
 
 	a.mu.Lock()

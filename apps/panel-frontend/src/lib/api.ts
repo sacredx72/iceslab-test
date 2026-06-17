@@ -495,6 +495,15 @@ export interface XrayInboundConfig {
   /** Slice 24c part 3, `vless` (default) or `trojan` over the same REALITY
    *  stack. Empty/undefined → server falls back to vless. */
   subprotocol?: 'vless' | 'trojan';
+  /** B3 advanced knobs. All optional, Zod-defaulted server-side. REALITY
+   *  pair applies when security=reality, tlsRejectUnknownSni when
+   *  security=tls, xhttp* when network=xhttp, grpcMultiMode when network=grpc. */
+  realityXver?: 0 | 1 | 2;
+  realityMaxTimeDiff?: number;
+  tlsRejectUnknownSni?: boolean;
+  xhttpMode?: 'auto' | 'packet-up' | 'stream-up' | 'stream-one';
+  xhttpPaddingBytes?: string;
+  grpcMultiMode?: boolean;
 }
 
 export interface AmneziawgObfuscation {

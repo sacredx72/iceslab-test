@@ -94,11 +94,17 @@ export interface XrayInboundCfg {
   tlsCert?: string;
   /** TLS private key (PEM), paired with tlsCert. */
   tlsKey?: string;
+  /** Reject TLS handshakes whose SNI matches no served server name. */
+  tlsRejectUnknownSni?: boolean;
   realityDest: string;            // e.g. "www.cloudflare.com:443"
   realityServerNames: string[];   // SNI candidates
   realityShortIds: string[];      // hex strings, 0..16 chars even-length
   realityPrivateKey: string;      // base64url (REALITY-style, NOT WireGuard base64)
   realityPublicKey: string;
+  /** REALITY protocol version mirrored to the upstream dest (0|1|2). */
+  realityXver?: number;
+  /** Max client/node clock skew (ms) REALITY tolerates; 0 = xray default. */
+  realityMaxTimeDiff?: number;
   /** K9-B - how REALITY borrows a TLS identity:
    *   - 'steal-others' (default/empty): dest = an external camouflage site;
    *     works outside RU but SNI-IP-mismatches under RU-DPI.
@@ -113,6 +119,12 @@ export interface XrayInboundCfg {
   path?: string;                  // ws/xhttp/httpupgrade
   host?: string;                  // ws/xhttp/httpupgrade Host header override
   serviceName?: string;           // grpc
+  /** XHTTP packet mode; 'auto' (default) lets xray pick the framing. */
+  xhttpMode?: 'auto' | 'packet-up' | 'stream-up' | 'stream-one';
+  /** XHTTP request-padding byte range (e.g. "100-1000"); empty disables. */
+  xhttpPaddingBytes?: string;
+  /** gRPC multiMode: multiplex several streams per connection. */
+  grpcMultiMode?: boolean;
   /** Subprotocol carried by the xray inbound. `vless` (default) → per-user
    *  UUID with optional Vision flow; `trojan` → per-user password (we reuse
    *  user.xrayUuid); `vmess` → per-user UUID, AEAD (no flow). VMess pairs with

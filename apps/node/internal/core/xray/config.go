@@ -39,6 +39,13 @@ type InboundConfig struct {
 	RealityPrivateKey  string   // x25519 private key (paired pubkey advertised in URI)
 	RealityShortIDs    []string // hex strings, max 16 chars each
 
+	// B3 REALITY extras. RealityXver (0|1|2) is the protocol version mirrored
+	// to the upstream dest; 0 (default) renders as before. RealityMaxTimeDiff
+	// (ms) caps the client/node clock skew REALITY tolerates; 0 (default) omits
+	// the field and leaves xray-core's built-in value.
+	RealityXver        int
+	RealityMaxTimeDiff int
+
 	// RealityMode (K9-B) selects how REALITY borrows a TLS identity:
 	//   - "" / "steal-others": dest = an external camouflage site (default;
 	//     works outside RU but SNI-IP-mismatches under RU-DPI).
@@ -95,6 +102,22 @@ type InboundConfig struct {
 	TLSServerName string
 	TLSCert       string
 	TLSKey        string
+
+	// B3 TLSRejectUnknownSni: when true, reject TLS handshakes whose SNI
+	// matches no served server name. false (default) leaves the field off, so
+	// pre-B3 configs render identically.
+	TLSRejectUnknownSni bool
+
+	// B3 XHTTP knobs (Network == "xhttp"). XhttpMode is the packet framing:
+	// "" / "auto" (default) lets xray pick; "packet-up" / "stream-up" /
+	// "stream-one" force a specific mode. XhttpPaddingBytes is a request-padding
+	// byte range (e.g. "100-1000"); empty (default) disables padding.
+	XhttpMode         string
+	XhttpPaddingBytes string
+
+	// B3 GrpcMultiMode (Network == "grpc"): multiplex several gRPC streams per
+	// connection. false (default) keeps the single-stream behaviour.
+	GrpcMultiMode bool
 }
 
 func (c *InboundConfig) withDefaults() InboundConfig {
@@ -473,14 +496,20 @@ func buildStreamSettings(cfg InboundConfig) map[string]any {
 	// REALITY material is emitted only for the reality security layer; "none"
 	// is a plain transport (the TLS, if any, is terminated by a fronting CDN).
 	if security == "reality" {
-		stream["realitySettings"] = map[string]any{
+		realitySettings := map[string]any{
 			"show":        false,
 			"dest":        cfg.RealityDest,
-			"xver":        0,
+			"xver":        cfg.RealityXver,
 			"serverNames": cfg.RealityServerNames,
 			"privateKey":  cfg.RealityPrivateKey,
 			"shortIds":    cfg.RealityShortIDs,
 		}
+		// B3: only emit maxTimeDiff when set, so the default (0) render stays
+		// byte-identical to pre-B3 configs.
+		if cfg.RealityMaxTimeDiff > 0 {
+			realitySettings["maxTimeDiff"] = cfg.RealityMaxTimeDiff
+		}
+		stream["realitySettings"] = realitySettings
 	}
 	// TLS terminates on the node with the operator-supplied cert, embedded
 	// inline (no ACME). xray accepts `certificate`/`key` as string arrays.
@@ -496,6 +525,11 @@ func buildStreamSettings(cfg InboundConfig) map[string]any {
 		if cfg.TLSServerName != "" {
 			tls["serverName"] = cfg.TLSServerName
 		}
+		// B3: harden against SNI probing. Off by default; omitting the field
+		// keeps pre-B3 configs byte-identical.
+		if cfg.TLSRejectUnknownSni {
+			tls["rejectUnknownSni"] = true
+		}
 		stream["tlsSettings"] = tls
 	}
 
@@ -509,9 +543,20 @@ func buildStreamSettings(cfg InboundConfig) map[string]any {
 		}
 		stream["wsSettings"] = ws
 	case "xhttp":
-		xh := map[string]any{"path": path, "mode": "auto"}
+		// B3: mode from the panel; empty falls back to "auto" so pre-B3 configs
+		// render identically.
+		mode := cfg.XhttpMode
+		if mode == "" {
+			mode = "auto"
+		}
+		xh := map[string]any{"path": path, "mode": mode}
 		if cfg.HostHeader != "" {
 			xh["host"] = cfg.HostHeader
+		}
+		// B3: request padding blurs the packet-size signature under DPI. Empty
+		// (default) omits `extra`, keeping the render byte-stable.
+		if cfg.XhttpPaddingBytes != "" {
+			xh["extra"] = map[string]any{"xPaddingBytes": cfg.XhttpPaddingBytes}
 		}
 		stream["xhttpSettings"] = xh
 	case "httpupgrade":
@@ -523,7 +568,8 @@ func buildStreamSettings(cfg InboundConfig) map[string]any {
 	case "grpc":
 		stream["grpcSettings"] = map[string]any{
 			"serviceName": cfg.ServiceName,
-			"multiMode":   false,
+			// B3: multiMode from the panel; default false matches pre-B3 render.
+			"multiMode": cfg.GrpcMultiMode,
 		}
 	case "kcp":
 		// mKCP is UDP-based; collides with Hysteria on the same UDP port —

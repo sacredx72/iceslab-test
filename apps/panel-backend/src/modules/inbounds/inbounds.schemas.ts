@@ -53,6 +53,9 @@ export const XrayConfigSchema = z.object({
   tlsServerName: z.string().max(253).optional(),
   tlsCert: z.string().max(16384).optional(),
   tlsKey: z.string().max(16384).optional(),
+  /** Reject TLS handshakes whose SNI does not match a served server name.
+   *  Hardens against probing; off by default to stay lenient for plain probes. */
+  tlsRejectUnknownSni: z.boolean().default(false),
   /**
    * REALITY target — the legitimate site Xray forwards mismatched probes to.
    * Format `host:port`, e.g. "www.cloudflare.com:443". May be empty when
@@ -68,6 +71,12 @@ export const XrayConfigSchema = z.object({
   realityPrivateKey: z.string().max(128).default(''),
   /** REALITY public key paired with privateKey — emitted in client URI. */
   realityPublicKey: z.string().max(128).default(''),
+  /** REALITY protocol version mirrored to the upstream TLS dest. 0 (default)
+   *  is the conservative choice; 1/2 enable newer REALITY handshake variants. */
+  realityXver: z.number().int().min(0).max(2).default(0),
+  /** Max clock skew (ms) REALITY tolerates between client and node. 0 (default)
+   *  leaves it at xray-core's built-in value; raise it for clients with drift. */
+  realityMaxTimeDiff: z.number().int().min(0).max(600000).default(0),
   /**
    * REALITY camouflage mode.
    *   - 'steal-others' (default): borrow an external site's TLS identity
@@ -109,6 +118,15 @@ export const XrayConfigSchema = z.object({
   host: z.string().max(255).optional(),
   /** gRPC serviceName. Required when network=grpc. */
   serviceName: z.string().max(64).optional(),
+  /** XHTTP packet mode. 'auto' (default) lets xray pick; 'packet-up' /
+   *  'stream-up' / 'stream-one' force a specific framing for tricky CDNs. */
+  xhttpMode: z.enum(['auto', 'packet-up', 'stream-up', 'stream-one']).default('auto'),
+  /** XHTTP request-padding byte range (e.g. "100-1000"). Empty disables
+   *  padding; padding helps blur the packet-size signature under DPI. */
+  xhttpPaddingBytes: z.string().max(32).default(''),
+  /** gRPC multiMode. false (default) is single-stream; true multiplexes
+   *  several gRPC streams per connection for better throughput. */
+  grpcMultiMode: z.boolean().default(false),
 
   /**
    * Subprotocol carried over the same Xray binary + REALITY stack. Slice

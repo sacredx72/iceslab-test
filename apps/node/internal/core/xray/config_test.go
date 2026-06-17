@@ -548,6 +548,113 @@ func TestRender_Network_GrpcEmitsServiceName(t *testing.T) {
 	}
 }
 
+// ───── B3: extra xray options (xver / maxTimeDiff / rejectUnknownSni /
+// xhttp mode+padding / grpc multiMode) ─────
+
+// vlessStream pulls the streamSettings of the public vless inbound out of a
+// rendered config, so the B3 tests can assert on the transport-level shape.
+func vlessStream(t *testing.T, m map[string]any) map[string]any {
+	t.Helper()
+	for _, raw := range m["inbounds"].([]any) {
+		inb := raw.(map[string]any)
+		if inb["protocol"] == "vless" {
+			return inb["streamSettings"].(map[string]any)
+		}
+	}
+	t.Fatalf("vless inbound not found in render output")
+	return nil
+}
+
+func TestRender_B3_GrpcMultiMode(t *testing.T) {
+	cfg := validInbound()
+	cfg.Network = "grpc"
+	cfg.ServiceName = "GunSvc"
+	cfg.GrpcMultiMode = true
+	grpc := vlessStream(t, renderToMap(t, cfg))["grpcSettings"].(map[string]any)
+	if grpc["multiMode"] != true {
+		t.Errorf("grpcSettings.multiMode: got %v want true", grpc["multiMode"])
+	}
+}
+
+func TestRender_B3_XhttpMode(t *testing.T) {
+	cfg := validInbound()
+	cfg.Network = "xhttp"
+	cfg.XhttpMode = "packet-up"
+	cfg.XhttpPaddingBytes = "100-1000"
+	xh := vlessStream(t, renderToMap(t, cfg))["xhttpSettings"].(map[string]any)
+	if xh["mode"] != "packet-up" {
+		t.Errorf("xhttpSettings.mode: got %v want packet-up", xh["mode"])
+	}
+	extra, ok := xh["extra"].(map[string]any)
+	if !ok {
+		t.Fatalf("xhttpSettings.extra missing: %v", xh)
+	}
+	if extra["xPaddingBytes"] != "100-1000" {
+		t.Errorf("xhttp xPaddingBytes: got %v want 100-1000", extra["xPaddingBytes"])
+	}
+}
+
+func TestRender_B3_XhttpDefaultsToAutoNoPadding(t *testing.T) {
+	cfg := validInbound()
+	cfg.Network = "xhttp"
+	// XhttpMode / XhttpPaddingBytes left empty — must render as before B3.
+	xh := vlessStream(t, renderToMap(t, cfg))["xhttpSettings"].(map[string]any)
+	if xh["mode"] != "auto" {
+		t.Errorf("xhttp default mode: got %v want auto", xh["mode"])
+	}
+	if _, has := xh["extra"]; has {
+		t.Errorf("xhttp should omit extra when no padding set: %v", xh)
+	}
+}
+
+func TestRender_B3_TlsRejectUnknownSni(t *testing.T) {
+	cfg := validInbound()
+	cfg.Security = "tls"
+	cfg.TLSServerName = "node.example.com"
+	cfg.TLSCert = "-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----"
+	cfg.TLSKey = "-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----"
+	cfg.TLSRejectUnknownSni = true
+	tls := vlessStream(t, renderToMap(t, cfg))["tlsSettings"].(map[string]any)
+	if tls["rejectUnknownSni"] != true {
+		t.Errorf("tlsSettings.rejectUnknownSni: got %v want true", tls["rejectUnknownSni"])
+	}
+}
+
+func TestRender_B3_RealityXverAndMaxTimeDiff(t *testing.T) {
+	cfg := validInbound()
+	cfg.RealityXver = 2
+	cfg.RealityMaxTimeDiff = 60000
+	rs := vlessStream(t, renderToMap(t, cfg))["realitySettings"].(map[string]any)
+	// JSON numbers decode to float64.
+	if rs["xver"] != float64(2) {
+		t.Errorf("realitySettings.xver: got %v want 2", rs["xver"])
+	}
+	if rs["maxTimeDiff"] != float64(60000) {
+		t.Errorf("realitySettings.maxTimeDiff: got %v want 60000", rs["maxTimeDiff"])
+	}
+}
+
+// TestRender_B3_DefaultsBackwardCompatible pins the no-op render: default xver
+// 0, no maxTimeDiff, mode auto, multiMode false must match the pre-B3 output so
+// existing nodes are byte-stable across the upgrade.
+func TestRender_B3_DefaultsBackwardCompatible(t *testing.T) {
+	rs := vlessStream(t, renderToMap(t, validInbound()))["realitySettings"].(map[string]any)
+	if rs["xver"] != float64(0) {
+		t.Errorf("default realitySettings.xver: got %v want 0", rs["xver"])
+	}
+	if _, has := rs["maxTimeDiff"]; has {
+		t.Errorf("default render should omit maxTimeDiff: %v", rs)
+	}
+
+	cfg := validInbound()
+	cfg.Network = "grpc"
+	cfg.ServiceName = "GunSvc"
+	grpc := vlessStream(t, renderToMap(t, cfg))["grpcSettings"].(map[string]any)
+	if grpc["multiMode"] != false {
+		t.Errorf("default grpcSettings.multiMode: got %v want false", grpc["multiMode"])
+	}
+}
+
 // ───── Slice 24c part 3: Trojan subprotocol ─────
 
 func TestRender_DefaultsToVless(t *testing.T) {

@@ -15,6 +15,7 @@ import {
   Select,
   Stack,
   Switch,
+  Tabs,
   Text,
   TextInput,
   Textarea,
@@ -97,6 +98,15 @@ interface FormValues {
   xrayTlsServerName: string;
   xrayTlsCert: string;
   xrayTlsKey: string;
+  // B3 advanced xray options (surfaced in the "Advanced (xray)" Tabs block).
+  // Names + defaults mirror the backend Zod schema exactly so the payload
+  // validates without a round-trip.
+  xrayRealityXver: 0 | 1 | 2;
+  xrayRealityMaxTimeDiff: number | '';
+  xrayTlsRejectUnknownSni: boolean;
+  xrayXhttpMode: 'auto' | 'packet-up' | 'stream-up' | 'stream-one';
+  xrayXhttpPaddingBytes: string;
+  xrayGrpcMultiMode: boolean;
 
   // AmneziaWG
   awgSubnet: string;
@@ -216,6 +226,12 @@ function defaults(profile: Profile | null): FormValues {
     xrayTlsServerName: '',
     xrayTlsCert: '',
     xrayTlsKey: '',
+    xrayRealityXver: 0,
+    xrayRealityMaxTimeDiff: 0,
+    xrayTlsRejectUnknownSni: false,
+    xrayXhttpMode: 'auto',
+    xrayXhttpPaddingBytes: '',
+    xrayGrpcMultiMode: false,
 
     awgSubnet: '10.66.66.0/24',
     awgServerPriv: '',
@@ -281,6 +297,12 @@ function defaults(profile: Profile | null): FormValues {
         xrayTlsServerName: (cfg.tlsServerName as string) ?? base.xrayTlsServerName,
         xrayTlsCert: (cfg.tlsCert as string) ?? base.xrayTlsCert,
         xrayTlsKey: (cfg.tlsKey as string) ?? base.xrayTlsKey,
+        xrayRealityXver: ((cfg.realityXver as 0 | 1 | 2) ?? base.xrayRealityXver),
+        xrayRealityMaxTimeDiff: (cfg.realityMaxTimeDiff as number) ?? base.xrayRealityMaxTimeDiff,
+        xrayTlsRejectUnknownSni: (cfg.tlsRejectUnknownSni as boolean) ?? base.xrayTlsRejectUnknownSni,
+        xrayXhttpMode: ((cfg.xhttpMode as FormValues['xrayXhttpMode']) ?? base.xrayXhttpMode),
+        xrayXhttpPaddingBytes: (cfg.xhttpPaddingBytes as string) ?? base.xrayXhttpPaddingBytes,
+        xrayGrpcMultiMode: (cfg.grpcMultiMode as boolean) ?? base.xrayGrpcMultiMode,
       };
     case 'amneziawg': {
       const obf = (cfg.obfuscation as Record<string, number | string> | undefined) ?? {};
@@ -504,6 +526,26 @@ export function ProfileFormModal({ opened, onClose, profile, onSubmit, loading }
           ...(values.xrayPath ? { path: values.xrayPath } : {}),
           ...(values.xrayHostHeader ? { host: values.xrayHostHeader } : {}),
           ...(values.xrayServiceName ? { serviceName: values.xrayServiceName } : {}),
+          // B3 advanced options - only emit the ones relevant to the chosen
+          // security/network, mirroring how each tab gates its controls.
+          ...(values.xraySecurity === 'reality'
+            ? {
+                realityXver: Number(values.xrayRealityXver),
+                realityMaxTimeDiff: numOr(values.xrayRealityMaxTimeDiff, 0),
+              }
+            : {}),
+          ...(values.xraySecurity === 'tls'
+            ? { tlsRejectUnknownSni: values.xrayTlsRejectUnknownSni }
+            : {}),
+          ...(values.xrayNetwork === 'xhttp'
+            ? {
+                xhttpMode: values.xrayXhttpMode,
+                xhttpPaddingBytes: values.xrayXhttpPaddingBytes.trim(),
+              }
+            : {}),
+          ...(values.xrayNetwork === 'grpc'
+            ? { grpcMultiMode: values.xrayGrpcMultiMode }
+            : {}),
         };
         break;
       case 'amneziawg':
@@ -1031,6 +1073,106 @@ export function ProfileFormModal({ opened, onClose, profile, onSubmit, loading }
                   />
                 </>
               )}
+
+              {/* B3: advanced xray knobs, grouped into tabs so the common
+                  path stays clean. Each control is gated on the same
+                  security/network the field actually applies to (REALITY tab
+                  when security=reality, TLS tab when security=tls, the xhttp
+                  controls when network=xhttp, grpc control when network=grpc).
+                  Tabs whose underlying transport/security isn't selected just
+                  render an inactive hint, so the operator sees why. */}
+              <Divider label={t('profiles.form.cfg.advTitle')} labelPosition="left" />
+              <Tabs defaultValue="reality" variant="outline">
+                <Tabs.List>
+                  <Tabs.Tab value="reality">{t('profiles.form.cfg.advRealityTab')}</Tabs.Tab>
+                  <Tabs.Tab value="tls">{t('profiles.form.cfg.advTlsTab')}</Tabs.Tab>
+                  <Tabs.Tab value="transport">{t('profiles.form.cfg.advTransportTab')}</Tabs.Tab>
+                </Tabs.List>
+
+                <Tabs.Panel value="reality" pt="sm">
+                  {form.values.xraySecurity === 'reality' ? (
+                    <Group grow align="flex-start">
+                      <Select
+                        label={t('profiles.form.cfg.realityXverLabel')}
+                        description={t('profiles.form.cfg.realityXverDesc')}
+                        data={[
+                          { value: '0', label: '0' },
+                          { value: '1', label: '1' },
+                          { value: '2', label: '2' },
+                        ]}
+                        allowDeselect={false}
+                        value={String(form.values.xrayRealityXver)}
+                        onChange={(v) =>
+                          form.setFieldValue(
+                            'xrayRealityXver',
+                            (Number(v) as FormValues['xrayRealityXver']) || 0,
+                          )
+                        }
+                      />
+                      <NumberInput
+                        label={t('profiles.form.cfg.realityMaxTimeDiffLabel')}
+                        description={t('profiles.form.cfg.realityMaxTimeDiffDesc')}
+                        placeholder="0"
+                        min={0}
+                        {...form.getInputProps('xrayRealityMaxTimeDiff')}
+                      />
+                    </Group>
+                  ) : (
+                    <Text size="xs" c="dimmed">
+                      {t('profiles.form.cfg.advRealityInactive')}
+                    </Text>
+                  )}
+                </Tabs.Panel>
+
+                <Tabs.Panel value="tls" pt="sm">
+                  {form.values.xraySecurity === 'tls' ? (
+                    <Switch
+                      label={t('profiles.form.cfg.tlsRejectUnknownSniLabel')}
+                      description={t('profiles.form.cfg.tlsRejectUnknownSniDesc')}
+                      {...form.getInputProps('xrayTlsRejectUnknownSni', { type: 'checkbox' })}
+                    />
+                  ) : (
+                    <Text size="xs" c="dimmed">
+                      {t('profiles.form.cfg.advTlsInactive')}
+                    </Text>
+                  )}
+                </Tabs.Panel>
+
+                <Tabs.Panel value="transport" pt="sm">
+                  {form.values.xrayNetwork === 'xhttp' ? (
+                    <Stack gap="sm">
+                      <Select
+                        label={t('profiles.form.cfg.xhttpModeLabel')}
+                        description={t('profiles.form.cfg.xhttpModeDesc')}
+                        data={[
+                          { value: 'auto', label: 'auto' },
+                          { value: 'packet-up', label: 'packet-up' },
+                          { value: 'stream-up', label: 'stream-up' },
+                          { value: 'stream-one', label: 'stream-one' },
+                        ]}
+                        allowDeselect={false}
+                        {...form.getInputProps('xrayXhttpMode')}
+                      />
+                      <TextInput
+                        label={t('profiles.form.cfg.xhttpPaddingBytesLabel')}
+                        description={t('profiles.form.cfg.xhttpPaddingBytesDesc')}
+                        placeholder="100-1000"
+                        {...form.getInputProps('xrayXhttpPaddingBytes')}
+                      />
+                    </Stack>
+                  ) : form.values.xrayNetwork === 'grpc' ? (
+                    <Switch
+                      label={t('profiles.form.cfg.grpcMultiModeLabel')}
+                      description={t('profiles.form.cfg.grpcMultiModeDesc')}
+                      {...form.getInputProps('xrayGrpcMultiMode', { type: 'checkbox' })}
+                    />
+                  ) : (
+                    <Text size="xs" c="dimmed">
+                      {t('profiles.form.cfg.advTransportInactive')}
+                    </Text>
+                  )}
+                </Tabs.Panel>
+              </Tabs>
             </Stack>
           )}
 
