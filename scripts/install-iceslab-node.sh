@@ -1037,6 +1037,19 @@ if [[ "${SKIP_FIREWALL:-0}" != "1" ]]; then
       fi
     done
     unset _SSH_IPS
+    # Lockout guard: if we're on an SSH session whose client IP isn't in the
+    # allowlist, `ufw --force enable` below would cut THIS connection. Allow it
+    # so the operator can't brick their own access; warn so a jump-host IP can
+    # be removed later. (A CIDR in the list already covering it just makes this
+    # a harmless extra /32 rule.)
+    _CUR_SSH_IP="$(printf '%s' "${SSH_CONNECTION:-}" | awk '{print $1}')"
+    _AL_NOSPACE="${SSH_ALLOWLIST// /}"
+    if [[ -n "$_CUR_SSH_IP" && ",${_AL_NOSPACE}," != *",${_CUR_SSH_IP},"* ]]; then
+      warn "current SSH IP ${_CUR_SSH_IP} is NOT in --ssh-allowlist; allowing it to"
+      warn "avoid locking out this session. Remove later if unintended:"
+      warn "  ufw delete allow from ${_CUR_SSH_IP} to any port 22 proto tcp"
+      ufw allow from "${_CUR_SSH_IP}" to any port 22 proto tcp >/dev/null 2>&1 || true
+    fi
   elif [[ "$HARDEN_UFW" == "1" ]]; then
     # No allowlist but hardening on: keep 22/tcp world-reachable but rate-limit
     # it so password/key brute-force probes get throttled (ufw limit = max 6
@@ -1132,7 +1145,10 @@ fi
 # untouched whether the flag is on or off.
 if [[ "$FAIL2BAN" == "1" ]]; then
   log "fail2ban: installing + configuring jails (sshd + hysteria-auth)"
-  "${APT_ENV[@]}" apt-get "${APT_OPTS[@]}" install -y fail2ban
+  # Optional hardening: never abort the node install (ERR trap + set -e) just
+  # because fail2ban couldn't install. Warn and press on; the agent matters more.
+  "${APT_ENV[@]}" apt-get "${APT_OPTS[@]}" install -y fail2ban \
+    || warn "fail2ban apt install failed; continuing (fail2ban is optional, the node agent is the priority)"
 
   # Custom filter for the agent's Hysteria auth-callback rejections.
   # The agent logs JSON to stdout (slog) -> journald. A rejected client
@@ -1173,7 +1189,8 @@ bantime  = 1h
 EOF
 
   systemctl enable fail2ban >/dev/null 2>&1 || true
-  systemctl restart fail2ban
+  systemctl restart fail2ban \
+    || warn "fail2ban restart failed; node install continues (fail2ban is optional)"
   log "fail2ban active, jails: $(fail2ban-client status 2>/dev/null | awk -F: '/Jail list/{print $2}' | xargs)"
 fi
 
