@@ -8,7 +8,9 @@ All notable changes to Iceslab are documented here. Format loosely follows
 The censorship-survival work from v0.1.6 made functional and field-ready: the
 REALITY self-steal vertical actually works end to end now, traffic accounting is
 zero-loss across restarts, and admin two-factor is hardened against code replay.
-Plus the full advanced Xray option surface and an opt-in probe-resistance knob.
+Plus the full advanced Xray option surface and an opt-in probe-resistance knob,
+TLS-fragment, per-user and China routing presets, a Shadowsocks cascade link, a
+realistic self-steal fallback, and live Shadowsocks user management.
 Not yet tagged: the headline self-steal path is pending a real-network field run.
 
 ### Security
@@ -29,6 +31,25 @@ Not yet tagged: the headline self-steal path is pending a real-network field run
   fails REALITY auth is forwarded to the target slowly and sees a slow site
   rather than a full-speed proxy. Off by default: the throttle is itself a
   detectable pattern, so it stays an expert opt-in.
+- **TLS-fragment (opt-in, Xray-JSON).** A subscription can fragment the client
+  ClientHello so SNI-based DPI cannot cleanly match the handshake. Off by
+  default; toggle via a panel setting or the `?fragment=` query. Emitted only
+  into the Xray-JSON format (a freedom fragment outbound the proxy dials
+  through); intentionally not sing-box (the upstream field is unstable).
+- **Per-user routing override + operator custom domain lists (R3).** A routing
+  preset can now be set per user (winning over the squad and global defaults),
+  and an operator can define direct / proxy / block domain lists emitted into the
+  Xray-JSON and Clash routing rules. Empty or unset leaves output unchanged.
+- **China routing preset (cn-split, H2).** A China-direct mirror of ru-split:
+  China domains and IPs resolve and egress direct (clean DNS via AliDNS),
+  everything else tunneled. Across Xray-JSON, Clash and sing-box.
+- **Shadowsocks cascade link cell (C3b).** A multi-hop cascade can use a
+  Shadowsocks-2022 inter-hop link in addition to VLESS, including mixed chains.
+  Node-to-node link only; the entry hop still does the DPI evasion.
+- **Realistic self-steal fallback (G1, opt-in).** A self-steal node can
+  reverse-proxy unverified probe requests to a real upstream site instead of the
+  stub page, so a deep prober sees genuine content. Off by default (static
+  landing); any upstream error falls back to the static page.
 
 ### Changed
 
@@ -42,6 +63,13 @@ Not yet tagged: the headline self-steal path is pending a real-network field run
   works served from anywhere without a build-time override.
 - **Dependency audit gate kept clean.** Two transitive advisories pulled to
   patched versions via overrides so the production audit gate stays green.
+- **Live Shadowsocks user management (N1-SS).** Adding or removing a Shadowsocks
+  user now goes through the running core's runtime API with no restart (live
+  connections preserved), matching the Xray live-management path, with the same
+  config-restart fallback when the runtime call cannot be made.
+- **Stricter REALITY target check (H1).** The pre-deploy test-connect now also
+  verifies the masquerade target negotiates HTTP/2, not just TLS 1.3, and
+  surfaces a single health note: a CDN-grade dest should speak both.
 
 ### Fixed
 
