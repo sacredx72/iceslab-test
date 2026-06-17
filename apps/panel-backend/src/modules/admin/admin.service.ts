@@ -111,3 +111,14 @@ export async function findAdminById(id: string) {
 export async function verifyPassword(plaintext: string, hash: string): Promise<boolean> {
   return bcrypt.compare(plaintext, hash);
 }
+
+/**
+ * #14 - record the time-step of the last accepted TOTP code so a subsequent
+ * login can reject a replayed code (any step <= the stored one).
+ */
+export async function recordTotpStep(adminId: string, step: number): Promise<void> {
+  await prisma.adminUser.update({
+    where: { id: adminId },
+    data: { totpLastUsedStep: step },
+  });
+}

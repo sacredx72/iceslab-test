@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { base32Decode, base32Encode, generateTotp, totpUri, verifyTotp } from './totp.js';
+import {
+  base32Decode,
+  base32Encode,
+  generateTotp,
+  totpUri,
+  verifyTotp,
+  verifyTotpStep,
+} from './totp.js';
 
 // RFC 6238 Appendix B test vectors (SHA1, secret = ASCII "12345678901234567890").
 // The RFC lists 8-digit values; we emit 6 digits = the last 6 of each.
@@ -30,6 +37,19 @@ describe('totp', () => {
     expect(verifyTotp(RFC_SECRET, generateTotp(RFC_SECRET, now - 30), now)).toBe(true);
     expect(verifyTotp(RFC_SECRET, generateTotp(RFC_SECRET, now + 30), now)).toBe(true);
     expect(verifyTotp(RFC_SECRET, generateTotp(RFC_SECRET, now - 120), now)).toBe(false);
+  });
+
+  it('verifyTotpStep returns the matched step (for replay rejection)', () => {
+    const now = 1234567890;
+    const step = Math.floor(now / 30);
+    // current code resolves to the current step
+    expect(verifyTotpStep(RFC_SECRET, '005924', now)).toBe(step);
+    // bad / malformed codes resolve to null
+    expect(verifyTotpStep(RFC_SECRET, '000000', now)).toBeNull();
+    expect(verifyTotpStep(RFC_SECRET, 'abc', now)).toBeNull();
+    // a previous-window code resolves to the previous step, so a caller that
+    // stored `step` as the last-accepted one would reject it as a replay.
+    expect(verifyTotpStep(RFC_SECRET, generateTotp(RFC_SECRET, now - 30), now)).toBe(step - 1);
   });
 
   it('totpUri is a well-formed otpauth URL', () => {

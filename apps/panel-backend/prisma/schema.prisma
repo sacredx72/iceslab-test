@@ -20,6 +20,10 @@ model AdminUser {
   // valid code, and login enforces a code only when it's true.
   totpSecret   String?   @map("totp_secret") @db.VarChar(64)
   totpEnabled  Boolean   @default(false) @map("totp_enabled")
+  // #14 - time-step of the last accepted TOTP code. Login rejects any code
+  // whose step is <= this so a captured code can't be replayed within its
+  // validity window (RFC 6238 section 5.2). Null until the first 2FA login.
+  totpLastUsedStep Int?  @map("totp_last_used_step")
   createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt    DateTime? @map("deleted_at") @db.Timestamptz(6)
@@ -609,6 +613,23 @@ model NodeUsageHistory {
   // composite indexes above are leftmost on nodeId and useless for that.
   @@index([hour(sort: Desc)])
   @@map("node_usage_history")
+}
+
+/// #5 - per-(node, user) cumulative byte snapshot for non-destructive xray
+/// stats. The poller stores the last cumulative counters it saw from the agent
+/// and bills only the delta, so a lost response or a failed commit never drops
+/// bytes (the snapshot is advanced in the same transaction as the increments).
+/// No FK relations on purpose: rows for removed nodes/users are harmless and
+/// pruned separately, and it keeps the hot stats-poll write off relation joins.
+model NodeUserTrafficSnapshot {
+  nodeId    String   @map("node_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  cumIn     BigInt   @default(0) @map("cum_in")
+  cumOut    BigInt   @default(0) @map("cum_out")
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@id([nodeId, userId])
+  @@map("node_user_traffic_snapshot")
 }
 
 // ───── Slice S2: HWID enforcement ────────────────────────────────────────

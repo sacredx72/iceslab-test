@@ -89,8 +89,31 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 /**
- * Verify a 6-digit code against the secret, allowing ±`window` steps of clock
- * skew (default ±1 = ±30s). Constant-time compare to avoid leaking the code.
+ * Verify a 6-digit code and return the matched absolute time-step (counter),
+ * or null if no step within +/-`window` (default +/-1 = +/-30s) matches.
+ * Constant-time compare to avoid leaking the code. The returned step is what
+ * lets a caller defeat replay: store the last accepted step and reject any
+ * code whose step is <= it (RFC 6238 section 5.2).
+ */
+export function verifyTotpStep(
+  secretBase32: string,
+  code: string,
+  nowSec: number = Math.floor(Date.now() / 1000),
+  window = 1,
+): number | null {
+  const normalized = code.replace(/\s/g, '');
+  if (!/^\d{6}$/.test(normalized)) return null;
+  const key = base32Decode(secretBase32);
+  const counter = Math.floor(nowSec / PERIOD_SECONDS);
+  for (let w = -window; w <= window; w++) {
+    if (safeEqual(hotp(key, counter + w), normalized)) return counter + w;
+  }
+  return null;
+}
+
+/**
+ * Boolean form of verifyTotpStep, for callers that don't track replay (2FA
+ * enable/disable, which already require an authenticated session).
  */
 export function verifyTotp(
   secretBase32: string,
@@ -98,12 +121,5 @@ export function verifyTotp(
   nowSec: number = Math.floor(Date.now() / 1000),
   window = 1,
 ): boolean {
-  const normalized = code.replace(/\s/g, '');
-  if (!/^\d{6}$/.test(normalized)) return false;
-  const key = base32Decode(secretBase32);
-  const counter = Math.floor(nowSec / PERIOD_SECONDS);
-  for (let w = -window; w <= window; w++) {
-    if (safeEqual(hotp(key, counter + w), normalized)) return true;
-  }
-  return false;
+  return verifyTotpStep(secretBase32, code, nowSec, window) !== null;
 }

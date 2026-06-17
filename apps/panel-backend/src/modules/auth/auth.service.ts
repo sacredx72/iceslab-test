@@ -3,11 +3,12 @@ import type { AdminUser } from '../../generated/prisma/client.js';
 import {
   findAdminByUsername,
   verifyPassword,
+  recordTotpStep,
 } from '../admin/admin.service.js';
 import type { LoginInput } from './auth.schemas.js';
 import { redis } from '../../lib/redis.js';
 import { config } from '../../config.js';
-import { verifyTotp } from '../../lib/totp.js';
+import { verifyTotpStep } from '../../lib/totp.js';
 
 // Constant-work mitigation for username enumeration. When the username does
 // not exist we skip the real bcrypt.compare, so the not-found branch returns
@@ -135,10 +136,18 @@ export async function login(input: LoginInput, clientIp: string): Promise<AdminU
     if (!input.totpCode) {
       throw new TotpRequiredError();
     }
-    if (!verifyTotp(admin.totpSecret, input.totpCode)) {
+    // #14 - verify AND defeat replay: the matched time-step must be strictly
+    // greater than the last accepted one, so a captured code can't be reused
+    // inside its validity window (RFC 6238 section 5.2).
+    const step = verifyTotpStep(admin.totpSecret, input.totpCode);
+    if (
+      step === null ||
+      (admin.totpLastUsedStep !== null && step <= admin.totpLastUsedStep)
+    ) {
       await recordFailure(clientIp, input.username);
       throw new InvalidTotpError();
     }
+    await recordTotpStep(admin.id, step);
   }
 
   await clearFailures(clientIp, input.username);
