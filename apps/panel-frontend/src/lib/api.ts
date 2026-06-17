@@ -510,6 +510,9 @@ export interface XrayInboundConfig {
    *  security=tls, xhttp* when network=xhttp, grpcMultiMode when network=grpc. */
   realityXver?: 0 | 1 | 2;
   realityMaxTimeDiff?: number;
+  /** G: throttle unverified REALITY fallback (probe) connections, bytes/sec; 0 = off. */
+  realityLimitFallbackUploadBytesPerSec?: number;
+  realityLimitFallbackDownloadBytesPerSec?: number;
   tlsRejectUnknownSni?: boolean;
   xhttpMode?: 'auto' | 'packet-up' | 'stream-up' | 'stream-one';
   xhttpPaddingBytes?: string;

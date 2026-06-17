@@ -103,6 +103,10 @@ interface FormValues {
   // validates without a round-trip.
   xrayRealityXver: 0 | 1 | 2;
   xrayRealityMaxTimeDiff: number | '';
+  // G probe resistance: rate-limit (bytes/sec) for unverified REALITY fallback
+  // connections. 0 = off. Emitted only when security=reality.
+  xrayRealityLimitFallbackUpload: number | '';
+  xrayRealityLimitFallbackDownload: number | '';
   xrayTlsRejectUnknownSni: boolean;
   xrayXhttpMode: 'auto' | 'packet-up' | 'stream-up' | 'stream-one';
   xrayXhttpPaddingBytes: string;
@@ -228,6 +232,8 @@ function defaults(profile: Profile | null): FormValues {
     xrayTlsKey: '',
     xrayRealityXver: 0,
     xrayRealityMaxTimeDiff: 0,
+    xrayRealityLimitFallbackUpload: 0,
+    xrayRealityLimitFallbackDownload: 0,
     xrayTlsRejectUnknownSni: false,
     xrayXhttpMode: 'auto',
     xrayXhttpPaddingBytes: '',
@@ -299,6 +305,10 @@ function defaults(profile: Profile | null): FormValues {
         xrayTlsKey: (cfg.tlsKey as string) ?? base.xrayTlsKey,
         xrayRealityXver: ((cfg.realityXver as 0 | 1 | 2) ?? base.xrayRealityXver),
         xrayRealityMaxTimeDiff: (cfg.realityMaxTimeDiff as number) ?? base.xrayRealityMaxTimeDiff,
+        xrayRealityLimitFallbackUpload:
+          (cfg.realityLimitFallbackUploadBytesPerSec as number) ?? base.xrayRealityLimitFallbackUpload,
+        xrayRealityLimitFallbackDownload:
+          (cfg.realityLimitFallbackDownloadBytesPerSec as number) ?? base.xrayRealityLimitFallbackDownload,
         xrayTlsRejectUnknownSni: (cfg.tlsRejectUnknownSni as boolean) ?? base.xrayTlsRejectUnknownSni,
         xrayXhttpMode: ((cfg.xhttpMode as FormValues['xrayXhttpMode']) ?? base.xrayXhttpMode),
         xrayXhttpPaddingBytes: (cfg.xhttpPaddingBytes as string) ?? base.xrayXhttpPaddingBytes,
@@ -532,6 +542,9 @@ export function ProfileFormModal({ opened, onClose, profile, onSubmit, loading }
             ? {
                 realityXver: Number(values.xrayRealityXver),
                 realityMaxTimeDiff: numOr(values.xrayRealityMaxTimeDiff, 0),
+                // G: probe-resistance fallback rate-limit (bytes/sec, 0 = off).
+                realityLimitFallbackUploadBytesPerSec: numOr(values.xrayRealityLimitFallbackUpload, 0),
+                realityLimitFallbackDownloadBytesPerSec: numOr(values.xrayRealityLimitFallbackDownload, 0),
               }
             : {}),
           ...(values.xraySecurity === 'tls'
@@ -1091,32 +1104,55 @@ export function ProfileFormModal({ opened, onClose, profile, onSubmit, loading }
 
                 <Tabs.Panel value="reality" pt="sm">
                   {form.values.xraySecurity === 'reality' ? (
-                    <Group grow align="flex-start">
-                      <Select
-                        label={t('profiles.form.cfg.realityXverLabel')}
-                        description={t('profiles.form.cfg.realityXverDesc')}
-                        data={[
-                          { value: '0', label: '0' },
-                          { value: '1', label: '1' },
-                          { value: '2', label: '2' },
-                        ]}
-                        allowDeselect={false}
-                        value={String(form.values.xrayRealityXver)}
-                        onChange={(v) =>
-                          form.setFieldValue(
-                            'xrayRealityXver',
-                            (Number(v) as FormValues['xrayRealityXver']) || 0,
-                          )
-                        }
-                      />
-                      <NumberInput
-                        label={t('profiles.form.cfg.realityMaxTimeDiffLabel')}
-                        description={t('profiles.form.cfg.realityMaxTimeDiffDesc')}
-                        placeholder="0"
-                        min={0}
-                        {...form.getInputProps('xrayRealityMaxTimeDiff')}
-                      />
-                    </Group>
+                    <Stack gap="sm">
+                      <Group grow align="flex-start">
+                        <Select
+                          label={t('profiles.form.cfg.realityXverLabel')}
+                          description={t('profiles.form.cfg.realityXverDesc')}
+                          data={[
+                            { value: '0', label: '0' },
+                            { value: '1', label: '1' },
+                            { value: '2', label: '2' },
+                          ]}
+                          allowDeselect={false}
+                          value={String(form.values.xrayRealityXver)}
+                          onChange={(v) =>
+                            form.setFieldValue(
+                              'xrayRealityXver',
+                              (Number(v) as FormValues['xrayRealityXver']) || 0,
+                            )
+                          }
+                        />
+                        <NumberInput
+                          label={t('profiles.form.cfg.realityMaxTimeDiffLabel')}
+                          description={t('profiles.form.cfg.realityMaxTimeDiffDesc')}
+                          placeholder="0"
+                          min={0}
+                          {...form.getInputProps('xrayRealityMaxTimeDiff')}
+                        />
+                      </Group>
+                      {/* G: throttle the unverified fallback path so a prober
+                          that fails REALITY auth sees a slow site, not a proxy. */}
+                      <Text size="xs" fw={500}>
+                        {t('profiles.form.cfg.realityFallbackRateGroup')}
+                      </Text>
+                      <Group grow align="flex-start">
+                        <NumberInput
+                          label={t('profiles.form.cfg.realityLimitFallbackUploadLabel')}
+                          description={t('profiles.form.cfg.realityLimitFallbackUploadDesc')}
+                          placeholder="0"
+                          min={0}
+                          {...form.getInputProps('xrayRealityLimitFallbackUpload')}
+                        />
+                        <NumberInput
+                          label={t('profiles.form.cfg.realityLimitFallbackDownloadLabel')}
+                          description={t('profiles.form.cfg.realityLimitFallbackDownloadDesc')}
+                          placeholder="0"
+                          min={0}
+                          {...form.getInputProps('xrayRealityLimitFallbackDownload')}
+                        />
+                      </Group>
+                    </Stack>
                   ) : (
                     <Text size="xs" c="dimmed">
                       {t('profiles.form.cfg.advRealityInactive')}

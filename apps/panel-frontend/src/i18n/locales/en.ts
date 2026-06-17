@@ -364,6 +364,12 @@ export default {
         realityXverDesc: 'HTTP version sent to the decoy: 0 = auto, 1 = HTTP/1.1, 2 = HTTP/2',
         realityMaxTimeDiffLabel: 'Max time diff (ms)',
         realityMaxTimeDiffDesc: 'Allowed clock skew, ms. 0 = no limit',
+        // G probe resistance: throttle the unverified fallback path
+        realityFallbackRateGroup: 'Fallback rate-limit (probe resistance)',
+        realityLimitFallbackUploadLabel: 'Upload limit (bytes/sec)',
+        realityLimitFallbackUploadDesc: 'Throttle unverified fallback uploads so a prober sees a slow site. 0 = off',
+        realityLimitFallbackDownloadLabel: 'Download limit (bytes/sec)',
+        realityLimitFallbackDownloadDesc: 'Throttle unverified fallback downloads so a prober sees a slow site. 0 = off',
         tlsRejectUnknownSniLabel: 'Reject unknown SNI',
         tlsRejectUnknownSniDesc: 'Drop the handshake if the client SNI is not on the certificate',
         xhttpModeLabel: 'xhttp mode',

@@ -655,6 +655,54 @@ func TestRender_B3_DefaultsBackwardCompatible(t *testing.T) {
 	}
 }
 
+// ───── G: probe-resistance fallback rate-limit ─────
+
+// TestRender_G_RealityLimitFallback pins the throttle render: a non-zero
+// upload/download rate emits limitFallbackUpload/Download as REALITY objects
+// {afterBytes, bytesPerSec, burstBytesPerSec} on the unverified fallback path.
+func TestRender_G_RealityLimitFallback(t *testing.T) {
+	cfg := validInbound()
+	cfg.RealityLimitFallbackUploadBytesPerSec = 1048576
+	cfg.RealityLimitFallbackDownloadBytesPerSec = 2097152
+	rs := vlessStream(t, renderToMap(t, cfg))["realitySettings"].(map[string]any)
+
+	up, ok := rs["limitFallbackUpload"].(map[string]any)
+	if !ok {
+		t.Fatalf("realitySettings.limitFallbackUpload missing: %v", rs)
+	}
+	// JSON numbers decode to float64.
+	if up["bytesPerSec"] != float64(1048576) {
+		t.Errorf("limitFallbackUpload.bytesPerSec: got %v want 1048576", up["bytesPerSec"])
+	}
+	if up["burstBytesPerSec"] != float64(1048576) {
+		t.Errorf("limitFallbackUpload.burstBytesPerSec: got %v want 1048576", up["burstBytesPerSec"])
+	}
+	if up["afterBytes"] != float64(0) {
+		t.Errorf("limitFallbackUpload.afterBytes: got %v want 0", up["afterBytes"])
+	}
+
+	down, ok := rs["limitFallbackDownload"].(map[string]any)
+	if !ok {
+		t.Fatalf("realitySettings.limitFallbackDownload missing: %v", rs)
+	}
+	if down["bytesPerSec"] != float64(2097152) {
+		t.Errorf("limitFallbackDownload.bytesPerSec: got %v want 2097152", down["bytesPerSec"])
+	}
+}
+
+// TestRender_G_DefaultsOmitLimitFallback pins the no-op render: with both rates
+// 0 (default) neither limitFallbackUpload nor limitFallbackDownload is emitted,
+// so existing nodes stay byte-stable across the upgrade.
+func TestRender_G_DefaultsOmitLimitFallback(t *testing.T) {
+	rs := vlessStream(t, renderToMap(t, validInbound()))["realitySettings"].(map[string]any)
+	if _, has := rs["limitFallbackUpload"]; has {
+		t.Errorf("default render should omit limitFallbackUpload: %v", rs)
+	}
+	if _, has := rs["limitFallbackDownload"]; has {
+		t.Errorf("default render should omit limitFallbackDownload: %v", rs)
+	}
+}
+
 // ───── Slice 24c part 3: Trojan subprotocol ─────
 
 func TestRender_DefaultsToVless(t *testing.T) {

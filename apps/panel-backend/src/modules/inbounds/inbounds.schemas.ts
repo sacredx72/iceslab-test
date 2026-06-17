@@ -77,6 +77,11 @@ export const XrayConfigSchema = z.object({
   /** Max clock skew (ms) REALITY tolerates between client and node. 0 (default)
    *  leaves it at xray-core's built-in value; raise it for clients with drift. */
   realityMaxTimeDiff: z.number().int().min(0).max(600000).default(0),
+  /** G - rate-limit unverified REALITY fallback connections, bytes/sec, 0 = off.
+   *  Probe resistance: a scanner that fails REALITY auth is forwarded to the
+   *  target throttled, so it sees a slow site instead of a full-speed proxy. */
+  realityLimitFallbackUploadBytesPerSec: z.number().int().min(0).default(0),
+  realityLimitFallbackDownloadBytesPerSec: z.number().int().min(0).default(0),
   /**
    * REALITY camouflage mode.
    *   - 'steal-others' (default): borrow an external site's TLS identity

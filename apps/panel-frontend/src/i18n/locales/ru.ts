@@ -369,6 +369,12 @@ export default {
         realityXverDesc: 'HTTP-версия для декоя: 0 = авто, 1 = HTTP/1.1, 2 = HTTP/2',
         realityMaxTimeDiffLabel: 'Макс. расхождение времени (мс)',
         realityMaxTimeDiffDesc: 'Допустимый сдвиг часов, мс. 0 = без ограничения',
+        // G защита от пробинга: душим неверифицированный fallback
+        realityFallbackRateGroup: 'Лимит fallback (защита от пробинга)',
+        realityLimitFallbackUploadLabel: 'Лимит отдачи (байт/с)',
+        realityLimitFallbackUploadDesc: 'Душит отдачу неверифицированного fallback: пробер видит медленный сайт. 0 = выкл',
+        realityLimitFallbackDownloadLabel: 'Лимит загрузки (байт/с)',
+        realityLimitFallbackDownloadDesc: 'Душит загрузку неверифицированного fallback: пробер видит медленный сайт. 0 = выкл',
         tlsRejectUnknownSniLabel: 'Отклонять неизвестный SNI',
         tlsRejectUnknownSniDesc: 'Рвать handshake, если SNI клиента не в сертификате',
         xhttpModeLabel: 'Режим xhttp',

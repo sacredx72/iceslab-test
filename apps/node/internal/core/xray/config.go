@@ -46,6 +46,13 @@ type InboundConfig struct {
 	RealityXver        int
 	RealityMaxTimeDiff int
 
+	// G probe resistance. Rate-limit (bytes/sec) for UNVERIFIED REALITY
+	// fallback connections: a scanner that fails REALITY auth is forwarded to
+	// the target throttled, so it sees a slow site, not a full-speed proxy.
+	// 0 (default) omits the field and renders byte-identically to pre-G.
+	RealityLimitFallbackUploadBytesPerSec   int
+	RealityLimitFallbackDownloadBytesPerSec int
+
 	// RealityMode (K9-B) selects how REALITY borrows a TLS identity:
 	//   - "" / "steal-others": dest = an external camouflage site (default;
 	//     works outside RU but SNI-IP-mismatches under RU-DPI).
@@ -508,6 +515,22 @@ func buildStreamSettings(cfg InboundConfig) map[string]any {
 		// byte-identical to pre-B3 configs.
 		if cfg.RealityMaxTimeDiff > 0 {
 			realitySettings["maxTimeDiff"] = cfg.RealityMaxTimeDiff
+		}
+		// G: throttle unverified fallback (probe) connections. Emitted only when
+		// set, so the default (0) render stays byte-identical to pre-G configs.
+		if cfg.RealityLimitFallbackUploadBytesPerSec > 0 {
+			realitySettings["limitFallbackUpload"] = map[string]any{
+				"afterBytes":       0,
+				"bytesPerSec":      cfg.RealityLimitFallbackUploadBytesPerSec,
+				"burstBytesPerSec": cfg.RealityLimitFallbackUploadBytesPerSec,
+			}
+		}
+		if cfg.RealityLimitFallbackDownloadBytesPerSec > 0 {
+			realitySettings["limitFallbackDownload"] = map[string]any{
+				"afterBytes":       0,
+				"bytesPerSec":      cfg.RealityLimitFallbackDownloadBytesPerSec,
+				"burstBytesPerSec": cfg.RealityLimitFallbackDownloadBytesPerSec,
+			}
 		}
 		stream["realitySettings"] = realitySettings
 	}

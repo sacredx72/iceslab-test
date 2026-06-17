@@ -391,6 +391,10 @@ type xrayInboundCfgWire struct {
 	// pre-B3 configs, so omitting them keeps existing nodes byte-stable.
 	RealityXver         int    `json:"realityXver,omitempty"`
 	RealityMaxTimeDiff  int    `json:"realityMaxTimeDiff,omitempty"`
+	// G: throttle unverified REALITY fallback (probe) connections. 0 = off,
+	// renders byte-identically to pre-G configs (omitempty).
+	RealityLimitFallbackUploadBytesPerSec   int `json:"realityLimitFallbackUploadBytesPerSec,omitempty"`
+	RealityLimitFallbackDownloadBytesPerSec int `json:"realityLimitFallbackDownloadBytesPerSec,omitempty"`
 	TLSRejectUnknownSni bool   `json:"tlsRejectUnknownSni,omitempty"`
 	XhttpMode           string `json:"xhttpMode,omitempty"`
 	XhttpPaddingBytes   string `json:"xhttpPaddingBytes,omitempty"`
@@ -465,6 +469,9 @@ func (a *Adapter) ApplyInbound(port int, rawCfg json.RawMessage) error {
 		// XHTTP mode/padding, gRPC multiMode). Zero-values render as before.
 		RealityXver:         wire.RealityXver,
 		RealityMaxTimeDiff:  wire.RealityMaxTimeDiff,
+		// G: probe-resistance fallback rate-limit (bytes/sec, 0 = off).
+		RealityLimitFallbackUploadBytesPerSec:   wire.RealityLimitFallbackUploadBytesPerSec,
+		RealityLimitFallbackDownloadBytesPerSec: wire.RealityLimitFallbackDownloadBytesPerSec,
 		TLSRejectUnknownSni: wire.TLSRejectUnknownSni,
 		XhttpMode:           wire.XhttpMode,
 		XhttpPaddingBytes:   wire.XhttpPaddingBytes,

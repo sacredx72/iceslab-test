@@ -105,6 +105,9 @@ export interface XrayInboundCfg {
   realityXver?: number;
   /** Max client/node clock skew (ms) REALITY tolerates; 0 = xray default. */
   realityMaxTimeDiff?: number;
+  /** G - throttle unverified REALITY fallback (probe) connections, bytes/sec; 0 = off. */
+  realityLimitFallbackUploadBytesPerSec?: number;
+  realityLimitFallbackDownloadBytesPerSec?: number;
   /** K9-B - how REALITY borrows a TLS identity:
    *   - 'steal-others' (default/empty): dest = an external camouflage site;
    *     works outside RU but SNI-IP-mismatches under RU-DPI.
