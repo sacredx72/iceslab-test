@@ -1,5 +1,15 @@
 import type { Node } from '../../generated/prisma/client.js';
 
+// G (Zashchita / hardening) - public shape of the nodes.hardening jsonb blob.
+// Mirrors HardeningInput in nodes.schemas.ts; the frontend reads this to seed
+// the edit form so it must live on the public DTO.
+export interface HardeningDto {
+  ufwLockdown?: boolean;
+  fail2ban?: boolean;
+  realisticFallback?: boolean;
+  sshAllowlist?: string[];
+}
+
 export interface PublicNodeDto {
   id: string;
   name: string;
@@ -15,6 +25,8 @@ export interface PublicNodeDto {
   maxUsers: number | null;
   // B3/G — FQDN for REALITY self-steal serverName + future ACME.
   domain: string | null;
+  // G - probe-resistance toggles (Zashchita wizard). NULL = no hardening.
+  hardening: HardeningDto | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -37,6 +49,7 @@ export function mapNodeToPublic(node: Node): PublicNodeDto {
     regionId: node.regionId,
     maxUsers: node.maxUsers,
     domain: node.domain,
+    hardening: (node.hardening as HardeningDto | null) ?? null,
     createdAt: node.createdAt.toISOString(),
     updatedAt: node.updatedAt.toISOString(),
   };

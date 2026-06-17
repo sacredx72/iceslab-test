@@ -8,6 +8,7 @@ import type {
   NodeErrorResponse,
   ApplyInboundsRequest,
   ApplyInboundsResponse,
+  UfwPortsResponse,
 } from '@iceslab/shared';
 import { bootstrapCa, getPanelClientCert } from '../keygen/keygen.service.js';
 
@@ -211,6 +212,15 @@ export class NodeTransport {
       // Metrics endpoint is local /proc reads — should be fast. Tight timeout
       // keeps the per-tick poller bounded if a node hangs.
       timeoutMs: 3_000,
+    });
+  }
+
+  /** G4 probe-exposure: the node's ufw-allowed inbound ports. Read-only; the
+   *  panel diffs them against the expected set. 404 on older agents -> caller
+   *  treats it as "not checked". */
+  async getUfwPorts(): Promise<UfwPortsResponse> {
+    return this.request<UfwPortsResponse>('GET', '/ufwPorts', undefined, {
+      timeoutMs: 5_000,
     });
   }
 

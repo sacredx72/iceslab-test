@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { Prisma } from '../../generated/prisma/client.js';
 import { issueNodeCert, encodeNodePayload } from '../keygen/keygen.service.js';
 import { eventBus } from '../../lib/event-bus.js';
 import { prisma } from '../../prisma.js';
@@ -13,7 +14,12 @@ import {
   type CreateNodeResponseDto,
   type BootstrapInfo,
 } from './nodes.mapper.js';
-import type { CreateNodeInput, UpdateNodeInput, ListNodesQuery } from './nodes.schemas.js';
+import type {
+  CreateNodeInput,
+  UpdateNodeInput,
+  ListNodesQuery,
+  HardeningInput,
+} from './nodes.schemas.js';
 
 // ───── Domain errors ─────
 
@@ -70,6 +76,11 @@ export async function createNode(
       regionId: input.regionId ?? null,
       maxUsers: input.maxUsers ?? null,
       domain: input.domain ?? null,
+      // G - Zashchita hardening blob. Prisma.JsonNull (not raw null) sets the
+      // jsonb column to SQL NULL unambiguously; undefined would also work on
+      // create but JsonNull keeps "no hardening" explicit. Cast mirrors the
+      // jsonb-write pattern in profiles.service.ts (typed object -> InputJsonValue).
+      hardening: (input.hardening as Prisma.InputJsonValue | undefined) ?? Prisma.JsonNull,
       // Slice 38 — heartbeat-self-destruct secret. 32 bytes of entropy is
       // overkill for HMAC-SHA256 keying, but stays well under the 64-byte
       // block size and matches our convention for symmetric secrets.
@@ -108,6 +119,7 @@ export async function createNode(
       tokenInfo.token,
       node.protocol,
       node.address,
+      input.hardening,
     ),
   };
 
@@ -120,11 +132,48 @@ export async function createNode(
   return mapNodeWithPayload(node, payload, bootstrap);
 }
 
+/**
+ * G - append node-hardening flags to the install command. Each key maps 1:1
+ * to a flag in scripts/install-iceslab-node.sh. SHARED by both renderers
+ * (service create-path + routes refresh-path) so the two stay byte-identical;
+ * the install-command test asserts this contract.
+ *
+ * Mutates `lines` in place. If `hardening` is null/empty, emits nothing and
+ * the command is byte-identical to the pre-hardening output. Honours the
+ * existing line-continuation quirk: the previous last line has no trailing
+ * `\`, so we add one before pushing more (same as the hysteria block).
+ */
+export function appendHardeningFlags(
+  lines: string[],
+  hardening?: HardeningInput | null,
+): void {
+  if (!hardening) return;
+  const flags: string[] = [];
+  // ufwLockdown: tighten the firewall beyond the default per-protocol allows
+  // (rate-limit SSH, deny-by-default already on). Boolean flag.
+  if (hardening.ufwLockdown) flags.push('--harden-ufw');
+  // fail2ban: install + enable fail2ban with an sshd jail.
+  if (hardening.fail2ban) flags.push('--fail2ban');
+  // realisticFallback: REALITY/Caddy fallback serves a real-looking site
+  // instead of a bare reset, raising active-probe cost.
+  if (hardening.realisticFallback) flags.push('--realistic-fallback');
+  // sshAllowlist: comma-joined IP/CIDR list -> ufw locks 22/tcp to these only.
+  if (hardening.sshAllowlist && hardening.sshAllowlist.length > 0) {
+    flags.push(`--ssh-allowlist ${hardening.sshAllowlist.join(',')}`);
+  }
+  if (flags.length === 0) return;
+  lines[lines.length - 1] += ' \\';
+  for (let i = 0; i < flags.length; i++) {
+    lines.push(`  ${flags[i]}${i < flags.length - 1 ? ' \\' : ''}`);
+  }
+}
+
 async function renderBootstrapCommand(
   panelUrl: string,
   token: string,
   protocol: string,
   nodeAddress?: string,
+  hardening?: HardeningInput | null,
 ): Promise<string> {
   // Slice S7 — auto-detect or accept env-override of the panel's egress
   // IP so the install command can lock the agent's UFW to it. See
@@ -165,6 +214,11 @@ async function renderBootstrapCommand(
       lines.push('  --hysteria-email admin@example.com  # set ACME_DEFAULT_EMAIL env to inject automatically');
     }
   }
+
+  // G - node hardening flags. Shared helper keeps this byte-identical with
+  // renderRefreshBootstrapCommand in nodes.routes.ts.
+  appendHardeningFlags(lines, hardening);
+
   return lines.join('\n');
 }
 
@@ -222,6 +276,12 @@ export async function updateNode(id: string, input: UpdateNodeInput): Promise<Pu
   if (input.regionId !== undefined) data.regionId = input.regionId;
   if (input.maxUsers !== undefined) data.maxUsers = input.maxUsers;
   if (input.domain !== undefined) data.domain = input.domain;
+  // G - Zashchita hardening. Prisma.JsonNull (not raw null) so clearing the
+  // jsonb column maps to SQL NULL unambiguously (avoids DbNull/JsonNull mixup).
+  if (input.hardening !== undefined) {
+    data.hardening =
+      (input.hardening as Prisma.InputJsonValue | null) ?? Prisma.JsonNull;
+  }
 
   // A Node.domain change alters the per-node REALITY self-steal serverNames
   // pushed to the agent (inbounds.queue) and the client SNI (subscription).

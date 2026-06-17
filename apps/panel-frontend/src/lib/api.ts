@@ -302,6 +302,16 @@ export type NodeProtocol =
   | 'mtproto'
   | 'mieru';
 
+// G (Zashchita / hardening) - probe-resistance toggles persisted to
+// nodes.hardening. Each maps 1:1 to an install-iceslab-node.sh flag. NULL on a
+// node = no hardening (install command is unchanged).
+export interface NodeHardening {
+  ufwLockdown?: boolean;
+  fail2ban?: boolean;
+  realisticFallback?: boolean;
+  sshAllowlist?: string[];
+}
+
 export interface Node {
   id: string;
   name: string;
@@ -317,6 +327,8 @@ export interface Node {
   maxUsers: number | null;
   // B3/G - FQDN for REALITY self-steal serverName + future ACME.
   domain: string | null;
+  // G - Zashchita hardening blob.
+  hardening?: NodeHardening | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -366,6 +378,7 @@ export interface CreateNodeInput {
   regionId?: string | null;
   maxUsers?: number | null;
   domain?: string | null;
+  hardening?: NodeHardening | null;
 }
 
 export interface UpdateNodeInput {
@@ -377,6 +390,7 @@ export interface UpdateNodeInput {
   regionId?: string | null;
   maxUsers?: number | null;
   domain?: string | null;
+  hardening?: NodeHardening | null;
 }
 
 export async function listNodes(params?: {
@@ -425,6 +439,22 @@ export async function updateNode(id: string, input: UpdateNodeInput): Promise<No
 
 export async function deleteNode(id: string): Promise<void> {
   await api.delete(`/api/nodes/${id}`);
+}
+
+// ───── G4: node probe-exposure ─────
+
+export interface PortExposureResult {
+  /** false when the check could not run (ufw-less host, old/unreachable agent). */
+  checked: boolean;
+  managed?: boolean;
+  expected?: string[];
+  extras?: string[];
+  note?: string;
+}
+
+export async function getNodeExposure(id: string): Promise<PortExposureResult> {
+  const { data } = await api.get<PortExposureResult>(`/api/nodes/${id}/exposure`);
+  return data;
 }
 
 // ───── Subscription Response Rules (SRR) ─────

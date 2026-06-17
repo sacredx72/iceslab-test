@@ -15,17 +15,20 @@ import {
   Select,
   Stack,
   Stepper,
+  Switch,
+  TagsInput,
   Text,
   TextInput,
   ThemeIcon,
 } from '@mantine/core';
-import { useForm } from '@mantine/form';
+import { useForm, type UseFormReturnType } from '@mantine/form';
 import { useQuery } from '@tanstack/react-query';
-import { IconBolt, IconRocket, IconServer2 } from '@tabler/icons-react';
+import { IconBolt, IconRocket, IconServer2, IconShieldLock } from '@tabler/icons-react';
 import {
   listProfiles,
   type CreateNodeInput,
   type Node,
+  type NodeHardening,
   type NodeProtocol,
   type Profile,
   type UpdateNodeInput,
@@ -75,6 +78,32 @@ interface FormValues {
   // B3/G - public FQDN of THIS node (A-record to its IP). Used as the REALITY
   // serverName for self-steal profiles deployed here. Empty = no self-steal/ACME.
   domain: string;
+  // G (Zashchita) - probe-resistance toggles. Flattened into form state;
+  // recombined into a NodeHardening blob (or null) via buildHardening on submit.
+  hardenUfw: boolean;
+  hardenFail2ban: boolean;
+  hardenRealisticFallback: boolean;
+  hardenSshAllowlist: string[];
+}
+
+/**
+ * G - collapse the flat hardening form fields into the NodeHardening blob the
+ * backend persists. Returns null when nothing is enabled so the common node
+ * keeps hardening = NULL and the install command stays byte-identical.
+ */
+function buildHardening(v: {
+  hardenUfw: boolean;
+  hardenFail2ban: boolean;
+  hardenRealisticFallback: boolean;
+  hardenSshAllowlist: string[];
+}): NodeHardening | null {
+  const allow = v.hardenSshAllowlist.map((s) => s.trim()).filter(Boolean);
+  const h: NodeHardening = {};
+  if (v.hardenUfw) h.ufwLockdown = true;
+  if (v.hardenFail2ban) h.fail2ban = true;
+  if (v.hardenRealisticFallback) h.realisticFallback = true;
+  if (allow.length > 0) h.sshAllowlist = allow;
+  return Object.keys(h).length > 0 ? h : null;
 }
 
 /** Split a stored `address` into host + port. Empty port → DEFAULT_NODE_PORT. */
@@ -102,6 +131,10 @@ function defaults(node: Node | null): FormValues {
     countryCode: node?.countryCode ?? '',
     consumptionMultiplier: node ? Number(node.consumptionMultiplier) : 1,
     domain: node?.domain ?? '',
+    hardenUfw: node?.hardening?.ufwLockdown ?? false,
+    hardenFail2ban: node?.hardening?.fail2ban ?? false,
+    hardenRealisticFallback: node?.hardening?.realisticFallback ?? false,
+    hardenSshAllowlist: node?.hardening?.sshAllowlist ?? [],
   };
 }
 
@@ -212,6 +245,7 @@ export function NodeFormModal({ opened, onClose, node, onSubmit, loading }: Prop
       consumptionMultiplier:
         values.consumptionMultiplier === '' ? 1 : Number(values.consumptionMultiplier),
       domain: values.domain.trim() || null,
+      hardening: buildHardening(values),
     };
     if (isEdit) {
       await onSubmit(base satisfies UpdateNodeInput, selectedProfileIds);
@@ -374,6 +408,7 @@ export function NodeFormModal({ opened, onClose, node, onSubmit, loading }: Prop
               placeholder="des-01.example.com"
               {...form.getInputProps('domain')}
             />
+            <HardeningSection form={form} />
             <Group justify="space-between" mt="md">
               <Text
                 style={{
@@ -478,6 +513,60 @@ export function NodeFormModal({ opened, onClose, node, onSubmit, loading }: Prop
         )}
       </Stack>
     </Modal>
+  );
+}
+
+/**
+ * G (Zashchita) - additive hardening sub-section. Three probe-resistance
+ * switches + an SSH-allowlist tags input. Shares the parent form state via
+ * getInputProps so submit picks the values up through buildHardening.
+ */
+function HardeningSection({
+  form,
+}: {
+  form: UseFormReturnType<FormValues>;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Card withBorder radius="md" p="sm" mt="xs">
+      <Group gap={8} mb="xs">
+        <ThemeIcon size={26} radius="md" variant="light" color="teal">
+          <IconShieldLock size={14} />
+        </ThemeIcon>
+        <Stack gap={0}>
+          <Text fw={600} size="sm">
+            {t('nodes.form.hardeningSection')}
+          </Text>
+          <Text size="xs" c="dimmed">
+            {t('nodes.form.hardeningSectionDesc')}
+          </Text>
+        </Stack>
+      </Group>
+      <Stack gap="sm">
+        <Switch
+          label={t('nodes.form.hardeningUfw')}
+          description={t('nodes.form.hardeningUfwDesc')}
+          {...form.getInputProps('hardenUfw', { type: 'checkbox' })}
+        />
+        <Switch
+          label={t('nodes.form.hardeningFail2ban')}
+          description={t('nodes.form.hardeningFail2banDesc')}
+          {...form.getInputProps('hardenFail2ban', { type: 'checkbox' })}
+        />
+        <Switch
+          label={t('nodes.form.hardeningRealisticFallback')}
+          description={t('nodes.form.hardeningRealisticFallbackDesc')}
+          {...form.getInputProps('hardenRealisticFallback', { type: 'checkbox' })}
+        />
+        <TagsInput
+          label={t('nodes.form.hardeningSshAllowlist')}
+          description={t('nodes.form.hardeningSshAllowlistDesc')}
+          placeholder="203.0.113.4, 10.0.0.0/8"
+          clearable
+          {...form.getInputProps('hardenSshAllowlist')}
+        />
+      </Stack>
+    </Card>
   );
 }
 

@@ -197,6 +197,112 @@ describe('PUT /api/nodes/:id', () => {
   });
 });
 
+describe('node hardening (Zashchita) → install command', () => {
+  it('persists hardening and appends matching flags to the bootstrap command', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/nodes',
+      headers: auth(),
+      payload: {
+        name: 'hard-1',
+        address: '10.0.0.5:1337',
+        protocol: 'xray',
+        hardening: {
+          ufwLockdown: true,
+          fail2ban: true,
+          realisticFallback: true,
+          sshAllowlist: ['203.0.113.4', '10.0.0.0/8'],
+        },
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const body = JSON.parse(res.body);
+    // Public DTO echoes the stored blob.
+    expect(body.hardening).toMatchObject({
+      ufwLockdown: true,
+      fail2ban: true,
+      realisticFallback: true,
+      sshAllowlist: ['203.0.113.4', '10.0.0.0/8'],
+    });
+    // Generated install command carries each flag.
+    const cmd: string = body.bootstrap.command;
+    expect(cmd).toContain('--harden-ufw');
+    expect(cmd).toContain('--fail2ban');
+    expect(cmd).toContain('--realistic-fallback');
+    expect(cmd).toContain('--ssh-allowlist 203.0.113.4,10.0.0.0/8');
+  });
+
+  it('omits all hardening flags when hardening is absent (byte-identical to today)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/nodes',
+      headers: auth(),
+      payload: { name: 'plain-1', address: '10.0.0.6:1337', protocol: 'xray' },
+    });
+    expect(res.statusCode).toBe(201);
+    const body = JSON.parse(res.body);
+    expect(body.hardening).toBeNull();
+    const cmd: string = body.bootstrap.command;
+    expect(cmd).not.toContain('--harden-ufw');
+    expect(cmd).not.toContain('--fail2ban');
+    expect(cmd).not.toContain('--realistic-fallback');
+    expect(cmd).not.toContain('--ssh-allowlist');
+  });
+
+  it('create and refresh commands carry the same hardening flags (mirror contract)', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/nodes',
+      headers: auth(),
+      payload: {
+        name: 'mirror-1',
+        address: '10.0.0.7:1337',
+        protocol: 'xray',
+        hardening: { ufwLockdown: true, sshAllowlist: ['198.51.100.1'] },
+      },
+    });
+    const createdBody = JSON.parse(created.body);
+    const createCmd: string = createdBody.bootstrap.command;
+
+    const refreshed = await app.inject({
+      method: 'POST',
+      url: `/api/nodes/${createdBody.id}/bootstrap`,
+      headers: auth(),
+    });
+    expect(refreshed.statusCode).toBe(201);
+    const refreshCmd: string = JSON.parse(refreshed.body).command;
+
+    // The bootstrap token differs between the two, but the hardening tail must
+    // be byte-identical (both renderers share appendHardeningFlags). Compare
+    // just the hardening flag lines. Helper emits a fixed order: ufwLockdown,
+    // fail2ban, realisticFallback, sshAllowlist.
+    const hardeningLines = (s: string) =>
+      s
+        .split('\n')
+        .filter((l) => /--harden-ufw|--fail2ban|--realistic-fallback|--ssh-allowlist/.test(l))
+        .map((l) => l.trim());
+    expect(hardeningLines(createCmd)).toEqual([
+      '--harden-ufw \\',
+      '--ssh-allowlist 198.51.100.1',
+    ]);
+    expect(hardeningLines(refreshCmd)).toEqual(hardeningLines(createCmd));
+  });
+
+  it('rejects an unknown hardening key with 400 (strict schema)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/nodes',
+      headers: auth(),
+      payload: {
+        name: 'bad-1',
+        address: '10.0.0.8:1337',
+        hardening: { ufwLockown: true },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+});
+
 describe('DELETE /api/nodes/:id', () => {
   it('soft-deletes the node', async () => {
     const created = await app.inject({

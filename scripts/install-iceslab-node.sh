@@ -71,6 +71,20 @@
 # inbound config via applyInbounds. Set protocol-specific fields (domain,
 # email, masquerade, etc.) on the panel-side Profile via the admin UI.
 #
+# === ZASHCHITA (hardening, probe-resistance) ===
+#
+# Optional, protocol-independent. Emitted by the panel's node "Zashchita"
+# wizard; all default off (a node without them installs identically):
+#   --harden-ufw            rate-limit SSH (ufw limit) + tighten the firewall
+#   --fail2ban              install + enable fail2ban with an sshd jail
+#   --ssh-allowlist <csv>   lock 22/tcp to these IP/CIDRs only (comma-list)
+#   --realistic-fallback    record REALISTIC_FALLBACK=1 in the node env so the
+#                           agent serves a real-looking fallback on probe
+# Example:
+#   bash <(curl -fsSL .../install-iceslab-node.sh) \
+#     --panel-url https://panel.example.com --bootstrap bs_xxx --protocol xray \
+#     --harden-ufw --fail2ban --ssh-allowlist 203.0.113.4,10.0.0.0/8
+#
 # Alternative flows (file-based — for air-gapped or self-hosted gist setups):
 #   bash <(curl -fsSL .../install-iceslab-node.sh) --protocol xray --payload-file /tmp/payload.b64
 #   bash <(curl -fsSL .../install-iceslab-node.sh) --protocol xray --payload "@/tmp/payload.b64"
@@ -285,6 +299,23 @@ UNINSTALL=0
 # TLS handshakes and our agent leaks "I'm Iceslab" via the cert SAN.
 PANEL_IP=""
 
+# G (Zashchita / hardening) - probe-resistance toggles pushed from the panel's
+# node "Zashchita" wizard. Each maps 1:1 to a key in nodes.hardening (jsonb).
+# All default off so a node without hardening installs byte-identically.
+#   --harden-ufw         : rate-limit SSH (`ufw limit`), tighten the firewall
+#                          beyond the default per-protocol allows.
+#   --fail2ban           : install + enable fail2ban with an sshd jail (bans
+#                          IPs that brute-force SSH; raises probe/scan cost).
+#   --ssh-allowlist <csv>: comma-list of IP/CIDR; locks 22/tcp to these only
+#                          instead of world-open. Mirrors the --panel-ip loop.
+#   --realistic-fallback : record REALISTIC_FALLBACK=1 into the node env so the
+#                          agent serves a real-looking fallback site on probe
+#                          instead of a bare reset (active-probe resistance).
+HARDEN_UFW=0
+FAIL2BAN=0
+REALISTIC_FALLBACK=0
+SSH_ALLOWLIST=""   # comma-list of IP/CIDR; empty = keep world-open 22/tcp
+
 # Hysteria 2 server config (only used with --protocol hysteria). When DOMAIN
 # is given, the script writes /etc/hysteria/config.yaml + a hysteria systemd
 # unit and starts the server — admin gets a fully-configured node from one
@@ -362,6 +393,14 @@ do_uninstall() {
   log "Removing env directory (/etc/iceslab-node)"
   rm -rf /etc/iceslab-node
 
+  # G3 fail2ban: remove only OUR jail/filter (leave the fail2ban package
+  # installed, it may protect other services). jail.local is the legacy
+  # path written by older versions of this script.
+  rm -f /etc/fail2ban/jail.d/iceslab.local \
+        /etc/fail2ban/filter.d/iceslab-hysteria.conf \
+        /etc/fail2ban/jail.local
+  systemctl reload fail2ban 2>/dev/null || true
+
   log "Removing source checkout ($ICESLAB_NODE_DIR)"
   rm -rf "$ICESLAB_NODE_DIR"
 
@@ -429,6 +468,11 @@ while [[ $# -gt 0 ]]; do
     --reset)         RESET=1; shift ;;
     --uninstall)     UNINSTALL=1; shift ;;
     --panel-ip)      PANEL_IP="$2"; shift 2 ;;
+    # G (Zashchita / hardening) - see the HARDEN_UFW/FAIL2BAN block above.
+    --harden-ufw)         HARDEN_UFW=1; shift ;;
+    --fail2ban)           FAIL2BAN=1; shift ;;
+    --realistic-fallback) REALISTIC_FALLBACK=1; shift ;;
+    --ssh-allowlist)      SSH_ALLOWLIST="$2"; shift 2 ;;
     -h|--help)
       grep '^#' "$0" | sed 's/^# \?//'
       exit 0
@@ -861,6 +905,14 @@ NODE_PAYLOAD=${PAYLOAD}
 NODE_HOST=${NODE_HOST}
 NODE_PORT=${NODE_PORT}
 EOF
+  # G (Zashchita / hardening) - record realistic-fallback intent for the agent.
+  # The agent reads REALISTIC_FALLBACK when generating the REALITY/Caddy
+  # fallback so an active probe hits a real-looking site instead of a bare
+  # reset. The flag is recorded here; the protocol-specific fallback wiring is
+  # the agent's job (it already owns config generation). Default 0 = off.
+  if [[ "$REALISTIC_FALLBACK" == "1" ]]; then
+    echo "REALISTIC_FALLBACK=1" >> "$ENV_FILE"
+  fi
   case "$PROTOCOL" in
     hysteria)
       cat >> "$ENV_FILE" <<EOF
@@ -968,7 +1020,32 @@ step "Firewall (ufw)"
 # then flip defaults to deny + enable. Skip with SKIP_FIREWALL=1.
 if [[ "${SKIP_FIREWALL:-0}" != "1" ]]; then
   log "ufw: SSH + panel-mTLS:$NODE_PORT + protocol-specific"
-  ufw allow 22/tcp                       >/dev/null 2>&1 || true
+  # SSH FIRST (the lockout-safety rule above). G/Zashchita: when an
+  # --ssh-allowlist is given, lock 22/tcp to those IP/CIDRs only (mirror of
+  # the --panel-ip loop below) instead of world-open. --harden-ufw additionally
+  # rate-limits SSH (`ufw limit`) to slow brute-force scanners. The two compose:
+  # allowlisted hosts still get rate-limited if both flags are set.
+  if [[ -n "$SSH_ALLOWLIST" ]]; then
+    log "Restricting SSH 22/tcp to SSH_ALLOWLIST=$SSH_ALLOWLIST (comma-list)"
+    IFS=',' read -ra _SSH_IPS <<< "$SSH_ALLOWLIST"
+    for ip in "${_SSH_IPS[@]}"; do
+      [[ -z "${ip// /}" ]] && continue
+      if [[ "$HARDEN_UFW" == "1" ]]; then
+        ufw limit from "${ip// /}" to any port 22 proto tcp >/dev/null 2>&1 || true
+      else
+        ufw allow from "${ip// /}" to any port 22 proto tcp >/dev/null 2>&1 || true
+      fi
+    done
+    unset _SSH_IPS
+  elif [[ "$HARDEN_UFW" == "1" ]]; then
+    # No allowlist but hardening on: keep 22/tcp world-reachable but rate-limit
+    # it so password/key brute-force probes get throttled (ufw limit = max 6
+    # connections per 30s per source).
+    log "Hardening SSH: rate-limiting 22/tcp (ufw limit)"
+    ufw limit 22/tcp                     >/dev/null 2>&1 || true
+  else
+    ufw allow 22/tcp                     >/dev/null 2>&1 || true
+  fi
   # Slice S7 — restrict mTLS port to the panel's IP if --panel-ip given,
   # otherwise (--panel-ip not set) fall back to world-open with a loud warn.
   # Resolving --panel-url's host into a candidate IP would help, but DNS
@@ -1042,6 +1119,62 @@ if [[ "${SKIP_FIREWALL:-0}" != "1" ]]; then
   ufw default allow outgoing >/dev/null
   ufw --force enable         >/dev/null
   log "ufw status: $(ufw status | head -1)"
+fi
+
+# ───── Optional: fail2ban (G3) ─────
+# G (Zashchita / hardening): fail2ban. Gated on --fail2ban so the base install
+# stays lean (fail2ban is intentionally NOT in the apt prereqs line) and an
+# install without the flag (FAIL2BAN=0, the default) is byte-identical.
+# Installs fail2ban + jails for sshd and the Iceslab agent's Hysteria
+# auth-callback rejects (read from journald, unit iceslab-node), raising the
+# cost of SSH brute-force and credential-stuffing/auth-probing.
+# Emitted as a plain `log` block (NOT step()) so the [n/8] sequence is left
+# untouched whether the flag is on or off.
+if [[ "$FAIL2BAN" == "1" ]]; then
+  log "fail2ban: installing + configuring jails (sshd + hysteria-auth)"
+  "${APT_ENV[@]}" apt-get "${APT_OPTS[@]}" install -y fail2ban
+
+  # Custom filter for the agent's Hysteria auth-callback rejections.
+  # The agent logs JSON to stdout (slog) -> journald. A rejected client
+  # produces: {"...","msg":"hysteria auth rejected","addr":"<ip>:<port>"}.
+  # fail2ban's systemd backend hands the filter the MESSAGE field (the JSON
+  # blob), so failregex matches the addr field and <HOST> captures the IP.
+  install -d -m 755 /etc/fail2ban/filter.d
+  cat > /etc/fail2ban/filter.d/iceslab-hysteria.conf <<'EOF'
+[Definition]
+# Matches the agent's structured reject line; <HOST> is the offending IP.
+# addr is "ip:port"; the optional :port is consumed by (?::\d+)?.
+failregex = "msg":"hysteria auth rejected","addr":"<HOST>(?::\d+)?"
+journalmatch = _SYSTEMD_UNIT=iceslab-node.service
+EOF
+
+  # jail.local override (survives package upgrades; never edit jail.conf).
+  # sshd uses the distro-shipped sshd filter; hysteria uses ours. Both read
+  # journald (systemd backend) so no log files need to exist (default on
+  # minimal Ubuntu 24.04, which has no rsyslog/auth.log).
+  install -d -m 755 /etc/fail2ban/jail.d
+  cat > /etc/fail2ban/jail.d/iceslab.local <<EOF
+[DEFAULT]
+backend  = systemd
+bantime  = 1h
+findtime = 10m
+maxretry = 5
+
+[sshd]
+enabled  = true
+port     = ${SSH_PORT:-22}
+
+[iceslab-hysteria]
+enabled  = true
+filter   = iceslab-hysteria
+maxretry = 10
+findtime = 10m
+bantime  = 1h
+EOF
+
+  systemctl enable fail2ban >/dev/null 2>&1 || true
+  systemctl restart fail2ban
+  log "fail2ban active, jails: $(fail2ban-client status 2>/dev/null | awk -F: '/Jail list/{print $2}' | xargs)"
 fi
 
 step "systemd unit + start"

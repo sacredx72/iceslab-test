@@ -27,6 +27,28 @@ const DomainSchema = z
   .regex(/^[a-zA-Z0-9.-]+$/, 'Domain must be a bare FQDN (no scheme, no port)')
   .nullish();
 
+// G (Zashchita / hardening) - probe-resistance toggles persisted to
+// nodes.hardening (jsonb). Json column so future toggles add here without a
+// migration; the install script + agent only read the flags they understand.
+// .strict() rejects unknown keys so a typo'd flag fails loud (400) instead of
+// silently persisting a no-op key.
+const SshAllowEntrySchema = z
+  .string()
+  .max(64)
+  // IPv4, IPv4/CIDR, or bare IPv6 - same shape the script feeds `ufw allow from`.
+  .regex(/^[0-9a-fA-F:.]+(\/\d{1,3})?$/, 'Must be an IP or CIDR');
+
+export const HardeningSchema = z
+  .object({
+    ufwLockdown: z.boolean().optional(),
+    fail2ban: z.boolean().optional(),
+    realisticFallback: z.boolean().optional(),
+    sshAllowlist: z.array(SshAllowEntrySchema).max(16).optional(),
+  })
+  .strict()
+  .nullish();
+export type HardeningInput = z.infer<typeof HardeningSchema>;
+
 // Slice 27 — keep parity with the inbound/profile protocol enum in
 // inbounds.schemas.ts. Node.protocol is a label for "which adapter is the
 // primary / installed on this VPS"; the actual deployment is per-binding.
@@ -51,6 +73,7 @@ export const CreateNodeSchema = z.object({
   maxUsers: z.number().int().positive().max(100000).nullable().optional(),
   // B3/G
   domain: DomainSchema,
+  hardening: HardeningSchema,
 });
 export type CreateNodeInput = z.infer<typeof CreateNodeSchema>;
 
@@ -63,6 +86,7 @@ export const UpdateNodeSchema = z.object({
   regionId: z.uuid().nullable().optional(),
   maxUsers: z.number().int().positive().max(100000).nullable().optional(),
   domain: DomainSchema,
+  hardening: HardeningSchema,
 });
 export type UpdateNodeInput = z.infer<typeof UpdateNodeSchema>;
 

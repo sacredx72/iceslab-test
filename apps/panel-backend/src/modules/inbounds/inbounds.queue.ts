@@ -109,7 +109,7 @@ async function fetchActiveUsers(): Promise<ActiveUser[]> {
   });
 }
 
-async function fetchEnabledInbounds(nodeId: string): Promise<InboundDto[]> {
+export async function fetchEnabledInbounds(nodeId: string): Promise<InboundDto[]> {
   // Slice 27 — walks ProfileNodeBinding rows joined to Profile, and resolves
   // the deployable config for each. Replaces the old per-node `inbounds`
   // table read while keeping the wire format identical (the node-agent

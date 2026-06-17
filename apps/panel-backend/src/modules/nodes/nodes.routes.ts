@@ -7,8 +7,11 @@ import {
   UpdateNodeSchema,
   ListNodesQuerySchema,
   NodeIdParamSchema,
+  type HardeningInput,
 } from './nodes.schemas.js';
 import * as nodesService from './nodes.service.js';
+import { appendHardeningFlags } from './nodes.service.js';
+import { checkNodePortExposure } from './nodes.exposure.js';
 import * as bootstrap from './bootstrap.service.js';
 import { getPanelPublicIp } from './panel-ip.js';
 
@@ -39,6 +42,7 @@ async function renderRefreshBootstrapCommand(
   token: string,
   protocol: string,
   nodeAddress: string,
+  hardening?: HardeningInput | null,
 ): Promise<string> {
   const panelIp = await getPanelPublicIp();
   const lines = [
@@ -66,6 +70,11 @@ async function renderRefreshBootstrapCommand(
   }
   // Naive / SS2022 / MTProto / Mieru: no install-time flags. Profile-side
   // config flows over mTLS from panel via applyInbound after bootstrap.
+
+  // G - node hardening flags. Shared helper keeps this byte-identical with
+  // renderBootstrapCommand in nodes.service.ts.
+  appendHardeningFlags(lines, hardening);
+
   return lines.join('\n');
 }
 
@@ -138,6 +147,7 @@ export async function nodesRoutes(app: FastifyInstance): Promise<void> {
           tokenInfo.token,
           node.protocol,
           node.address,
+          node.hardening,
         ),
       });
     } catch (err) {
@@ -163,6 +173,14 @@ export async function nodesRoutes(app: FastifyInstance): Promise<void> {
       }
       throw err;
     }
+  });
+
+  // G4 probe-exposure: compare the node's open ufw ports to the expected set.
+  // Advisory + best-effort (an old/unreachable agent or ufw-less host returns
+  // checked:false), so it never throws a 4xx/5xx for a reachable request.
+  app.get('/api/nodes/:id/exposure', auth, async (request, reply) => {
+    const params = NodeIdParamSchema.parse(request.params);
+    return reply.send(await checkNodePortExposure(params.id));
   });
 
   app.put('/api/nodes/:id', auth, async (request, reply) => {

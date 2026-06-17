@@ -341,6 +341,23 @@ export interface HostMetricsResponse {
   collectedAt: string;
 }
 
+// ───── GET /ufwPorts ─────
+//
+// G4 probe-exposure: the node-agent reports its ufw-allowed inbound ports; the
+// panel compares them to the expected set (bindings + SSH + mTLS) and warns the
+// operator about anything unexpected left open.
+
+export interface UfwPortDto {
+  port: number;
+  proto: 'tcp' | 'udp';
+}
+
+export interface UfwPortsResponse {
+  /** false = ufw not installed on the node; the panel skips the exposure check. */
+  managed: boolean;
+  ports: UfwPortDto[];
+}
+
 // ───── Common error shape ─────
 
 export interface NodeErrorResponse {

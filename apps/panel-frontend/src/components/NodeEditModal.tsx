@@ -16,6 +16,8 @@ import {
   Select,
   SimpleGrid,
   Stack,
+  Switch,
+  TagsInput,
   Text,
   TextInput,
   ThemeIcon,
@@ -36,6 +38,7 @@ import {
   IconLink,
   IconPlus,
   IconRocket,
+  IconShieldLock,
   IconTrash,
   IconWorld,
 } from '@tabler/icons-react';
@@ -48,9 +51,13 @@ import {
   listRegions,
   listSquads,
   updateBinding,
+  getNodeExposure,
+  apiErrorMessage,
   type Host,
   type Node as PanelNode,
+  type NodeHardening,
   type NodeProtocol,
+  type PortExposureResult,
   type UpdateNodeInput,
 } from '../lib/api';
 import { useOverview } from '../hooks/useOverview';
@@ -96,6 +103,26 @@ interface FormValues {
   maxUsers: number | '';
   // B3/G - public FQDN for REALITY self-steal serverName + future ACME.
   domain: string;
+  // G (Zashchita) - probe-resistance toggles, flattened into form state.
+  hardenUfw: boolean;
+  hardenFail2ban: boolean;
+  hardenRealisticFallback: boolean;
+  hardenSshAllowlist: string[];
+}
+
+/**
+ * G - collapse the flat hardening fields into the NodeHardening blob the
+ * backend persists. Returns null when nothing is enabled so the node keeps
+ * hardening = NULL (install command unchanged).
+ */
+function buildHardening(v: FormValues): NodeHardening | null {
+  const allow = v.hardenSshAllowlist.map((s) => s.trim()).filter(Boolean);
+  const h: NodeHardening = {};
+  if (v.hardenUfw) h.ufwLockdown = true;
+  if (v.hardenFail2ban) h.fail2ban = true;
+  if (v.hardenRealisticFallback) h.realisticFallback = true;
+  if (allow.length > 0) h.sshAllowlist = allow;
+  return Object.keys(h).length > 0 ? h : null;
 }
 
 function splitAddress(address: string): { host: string; port: number } {
@@ -144,6 +171,10 @@ export function NodeEditModal({
       regionId: node?.regionId ?? '',
       maxUsers: node?.maxUsers ?? '',
       domain: node?.domain ?? '',
+      hardenUfw: node?.hardening?.ufwLockdown ?? false,
+      hardenFail2ban: node?.hardening?.fail2ban ?? false,
+      hardenRealisticFallback: node?.hardening?.realisticFallback ?? false,
+      hardenSshAllowlist: node?.hardening?.sshAllowlist ?? [],
     },
   });
 
@@ -160,6 +191,10 @@ export function NodeEditModal({
         regionId: node.regionId ?? '',
         maxUsers: node.maxUsers ?? '',
         domain: node.domain ?? '',
+        hardenUfw: node.hardening?.ufwLockdown ?? false,
+        hardenFail2ban: node.hardening?.fail2ban ?? false,
+        hardenRealisticFallback: node.hardening?.realisticFallback ?? false,
+        hardenSshAllowlist: node.hardening?.sshAllowlist ?? [],
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -179,6 +214,19 @@ export function NodeEditModal({
   // for no UX gain. Modal piggybacks on parent's interval via shared cache.
   const overviewQuery = useOverview({ enabled: opened });
   const overviewNode = overviewQuery.data?.nodes.find((n) => n.id === node?.id);
+
+  // G4 probe-exposure: on-demand diff of the node's open ufw ports vs the
+  // expected set. Best-effort - the backend returns checked:false for an old
+  // or unreachable agent, so a reachable node never errors here.
+  const [exposure, setExposure] = useState<PortExposureResult | null>(null);
+  const exposureMutation = useMutation({
+    mutationFn: () => getNodeExposure(node!.id),
+    onSuccess: setExposure,
+    onError: (e) => notifications.show({ color: 'red', message: apiErrorMessage(e) }),
+  });
+  useEffect(() => {
+    setExposure(null);
+  }, [opened, node]);
 
   // Bindings deployed on this node (with profile info inlined - `listBindings`
   // doesn't include profile name, so we cross-reference with `listProfiles`).
@@ -338,6 +386,7 @@ export function NodeEditModal({
       maxUsers:
         form.values.maxUsers === '' ? null : Number(form.values.maxUsers),
       domain: form.values.domain.trim() || null,
+      hardening: buildHardening(form.values),
     });
   }
 
@@ -553,6 +602,50 @@ export function NodeEditModal({
                 placeholder="des-01.example.com"
                 {...form.getInputProps('domain')}
               />
+
+              {/* G (Zashchita) - probe-resistance toggles. Mirrors the create
+                  wizard's HardeningSection; persisted to nodes.hardening. */}
+              <Box mt="xs">
+                <Group gap={8} mb="xs">
+                  <ThemeIcon size={26} radius="md" variant="light" color="teal">
+                    <IconShieldLock size={14} />
+                  </ThemeIcon>
+                  <Stack gap={0}>
+                    <Text fw={600} size="sm">
+                      {t('nodes.form.hardeningSection')}
+                    </Text>
+                    <Text size="xs" c="dimmed">
+                      {t('nodes.form.hardeningSectionDesc')}
+                    </Text>
+                  </Stack>
+                </Group>
+                <Stack gap="sm">
+                  <Switch
+                    label={t('nodes.form.hardeningUfw')}
+                    description={t('nodes.form.hardeningUfwDesc')}
+                    {...form.getInputProps('hardenUfw', { type: 'checkbox' })}
+                  />
+                  <Switch
+                    label={t('nodes.form.hardeningFail2ban')}
+                    description={t('nodes.form.hardeningFail2banDesc')}
+                    {...form.getInputProps('hardenFail2ban', { type: 'checkbox' })}
+                  />
+                  <Switch
+                    label={t('nodes.form.hardeningRealisticFallback')}
+                    description={t('nodes.form.hardeningRealisticFallbackDesc')}
+                    {...form.getInputProps('hardenRealisticFallback', {
+                      type: 'checkbox',
+                    })}
+                  />
+                  <TagsInput
+                    label={t('nodes.form.hardeningSshAllowlist')}
+                    description={t('nodes.form.hardeningSshAllowlistDesc')}
+                    placeholder="203.0.113.4, 10.0.0.0/8"
+                    clearable
+                    {...form.getInputProps('hardenSshAllowlist')}
+                  />
+                </Stack>
+              </Box>
             </Stack>
           </Card>
 
@@ -625,6 +718,41 @@ export function NodeEditModal({
                 {t('nodes.metricsLoading')}
               </Text>
             )}
+            {/* G4 probe-exposure: open ufw ports vs the expected set. */}
+            <Divider my="xs" />
+            <Group justify="space-between" align="center">
+              <Text size="xs" c="dimmed">
+                {t('nodes.edit.exposureLabel')}
+              </Text>
+              <Button
+                size="xs"
+                variant="light"
+                color="grape"
+                leftSection={<IconShieldLock size={14} />}
+                loading={exposureMutation.isPending}
+                onClick={() => exposureMutation.mutate()}
+              >
+                {t('nodes.edit.exposureCheck')}
+              </Button>
+            </Group>
+            {exposure &&
+              (exposure.checked ? (
+                (exposure.extras?.length ?? 0) > 0 ? (
+                  <Alert color="yellow" variant="light" p="xs" icon={<IconAlertTriangle size={14} />}>
+                    <Text size="xs">
+                      {t('nodes.edit.exposureExtra', { ports: exposure.extras!.join(', ') })}
+                    </Text>
+                  </Alert>
+                ) : (
+                  <Alert color="green" variant="light" p="xs" icon={<IconCheck size={14} />}>
+                    <Text size="xs">{t('nodes.edit.exposureClean')}</Text>
+                  </Alert>
+                )
+              ) : (
+                <Text size="xs" c="dimmed">
+                  {t('nodes.edit.exposureSkipped', { note: exposure.note ?? '' })}
+                </Text>
+              ))}
           </Card>
         </SimpleGrid>
 
