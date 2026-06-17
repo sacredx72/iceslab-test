@@ -101,6 +101,24 @@ type ssClient struct {
 	Email    string `json:"email"`
 }
 
+// buildUserInboundSettings produces the SS inbound's `settings` block: the
+// cipher, the server-level PSK, the per-user clients, and the relay network.
+// Single source of truth for the user shape - both renderConfig (full config)
+// and buildAduInbound (live `xray api adu`) call it, so the client shape
+// (password / email) can never drift between the two paths. Mirrors xray's
+// buildUserInboundSettings reuse.
+func buildUserInboundSettings(cfg InboundConfig, users []ssClient) map[string]any {
+	return map[string]any{
+		"method": cfg.Method,
+		// Server-level PSK (slice 24d, fix 2026-05-07). xray-core requires this
+		// at settings.password for SS2022 multi-user inbounds; clients combine
+		// it with per-user PSK as `ServerPSK:UserPSK` in the URI.
+		"password": cfg.ServerPSK,
+		"clients":  users,
+		"network":  "tcp,udp", // SS2022 supports UDP relay
+	}
+}
+
 // renderConfig produces an Xray config.json for an SS-only deployment.
 // Stats wiring mirrors the xray adapter (see ../xray/config.go) — same
 // `stats:{}` + `policy.levels.0.statsUserUplink/Downlink` + `api-in`
@@ -136,16 +154,7 @@ func renderConfig(inbound InboundConfig, users []ssClient) ([]byte, error) {
 				"listen":   cfg.ListenHost,
 				"port":     cfg.ListenPort,
 				"protocol": "shadowsocks",
-				"settings": map[string]any{
-					"method": cfg.Method,
-					// Server-level PSK (slice 24d, fix 2026-05-07). xray-core
-					// requires this at settings.password for SS2022 multi-user
-					// inbounds; clients combine it with per-user PSK as
-					// `ServerPSK:UserPSK` in the URI.
-					"password": cfg.ServerPSK,
-					"clients":  users,
-					"network":  "tcp,udp", // SS2022 supports UDP relay
-				},
+				"settings": buildUserInboundSettings(cfg, users),
 				"sniffing": map[string]any{
 					"enabled":      true,
 					"destOverride": []string{"http", "tls", "quic"},

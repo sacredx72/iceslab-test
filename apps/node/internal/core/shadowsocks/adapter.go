@@ -162,20 +162,15 @@ const (
 )
 
 // buildAduInbound renders the single-inbound JSON `xray api adu` consumes for a
-// Shadowsocks inbound: the SS settings shape (method + server PSK + the one
-// client + network) so xray-core can validate and attach the user. Mirrors the
-// settings block in renderConfig so the shape can't drift.
+// Shadowsocks inbound: the inbound tag + protocol + a settings block carrying
+// just the one user. Reuses buildUserInboundSettings so the client shape
+// (password + email) can't drift from what the full config emits.
 func buildAduInbound(inbound InboundConfig, target ssClient) ([]byte, error) {
 	c := inbound.withDefaults()
 	return json.Marshal(map[string]any{
 		"tag":      c.Tag,
 		"protocol": "shadowsocks",
-		"settings": map[string]any{
-			"method":   c.Method,
-			"password": c.ServerPSK,
-			"clients":  []ssClient{target},
-			"network":  "tcp,udp",
-		},
+		"settings": buildUserInboundSettings(c, []ssClient{target}),
 	})
 }
 

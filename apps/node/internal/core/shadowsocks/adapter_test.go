@@ -6,11 +6,114 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/icecompany-tech/iceslab/apps/node/internal/core"
+	"github.com/icecompany-tech/iceslab/apps/node/internal/core/subprocess"
 )
+
+// TestN1_AddUser_LivePathCallsAdu verifies N1-SS: when xray (which hosts the SS
+// inbound) is RUNNING, AddUser adds the user live via `xray api adu` and does
+// NOT restart. Injects a live stand-in process (/bin/sleep) so liveUpdateUser
+// takes the live branch, and a mock RunCmd to capture the CLI call.
+func TestN1_AddUser_LivePathCallsAdu(t *testing.T) {
+	dir := t.TempDir()
+	var calls [][]string
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	a := New(Config{
+		BinaryPath: "/usr/bin/xray",
+		ConfigPath: filepath.Join(dir, "config.json"),
+		Inbound: InboundConfig{
+			Method:     "2022-blake3-aes-256-gcm",
+			ServerPSK:  "BASE64-FAKE-SERVER-PSK==",
+			ListenPort: 8388,
+			ApiPort:    8081,
+		},
+		RunCmd: func(_ context.Context, name string, args ...string) ([]byte, error) {
+			calls = append(calls, append([]string{name}, args...))
+			return []byte("ok"), nil
+		},
+	}, logger)
+
+	// Stand-in running process so proc.Running() is true and the adapter has
+	// already started.
+	a.proc = subprocess.New(subprocess.Config{
+		Name: "ss-stub", Binary: "/bin/sleep", Args: []string{"30"}, Logger: logger,
+	})
+	if err := a.proc.Start(context.Background()); err != nil {
+		t.Fatalf("start stub: %v", err)
+	}
+	defer func() { _ = a.proc.Stop(context.Background()) }()
+	a.started = true
+
+	if err := a.AddUser(core.User{UserID: "alice", XrayUUID: "uuid-a"}); err != nil {
+		t.Fatalf("AddUser: %v", err)
+	}
+
+	foundAdu := false
+	for _, c := range calls {
+		joined := strings.Join(c, " ")
+		if strings.Contains(joined, "api adu") {
+			foundAdu = true
+		}
+		if strings.Contains(joined, "run -c") {
+			t.Errorf("live path should NOT restart xray, but saw: %v", c)
+		}
+	}
+	if !foundAdu {
+		t.Errorf("expected `api adu` (live add), got calls: %v", calls)
+	}
+}
+
+// TestN1_RemoveUser_LivePathCallsRmu mirrors the above for live removal.
+func TestN1_RemoveUser_LivePathCallsRmu(t *testing.T) {
+	dir := t.TempDir()
+	var calls [][]string
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	a := New(Config{
+		BinaryPath: "/usr/bin/xray",
+		ConfigPath: filepath.Join(dir, "config.json"),
+		Inbound: InboundConfig{
+			Method:     "2022-blake3-aes-256-gcm",
+			ServerPSK:  "BASE64-FAKE-SERVER-PSK==",
+			ListenPort: 8388,
+			ApiPort:    8081,
+		},
+		RunCmd: func(_ context.Context, name string, args ...string) ([]byte, error) {
+			calls = append(calls, append([]string{name}, args...))
+			return []byte("ok"), nil
+		},
+	}, logger)
+	// Pre-seed a tracked user (directly; AddUser would also work but we don't
+	// want its adu call polluting `calls`).
+	a.users["alice"] = ssClient{Password: "uuid-a", Email: "alice"}
+
+	a.proc = subprocess.New(subprocess.Config{
+		Name: "ss-stub", Binary: "/bin/sleep", Args: []string{"30"}, Logger: logger,
+	})
+	if err := a.proc.Start(context.Background()); err != nil {
+		t.Fatalf("start stub: %v", err)
+	}
+	defer func() { _ = a.proc.Stop(context.Background()) }()
+	a.started = true
+
+	if err := a.RemoveUser("alice"); err != nil {
+		t.Fatalf("RemoveUser: %v", err)
+	}
+
+	foundRmu := false
+	for _, c := range calls {
+		joined := strings.Join(c, " ")
+		if strings.Contains(joined, "api rmu") && strings.Contains(joined, "alice") {
+			foundRmu = true
+		}
+	}
+	if !foundRmu {
+		t.Errorf("expected `api rmu ... alice` (live remove), got calls: %v", calls)
+	}
+}
 
 // TestN1_BuildAduInbound verifies the `xray api adu` input JSON for a
 // Shadowsocks inbound: tag + protocol=shadowsocks + settings carrying the
