@@ -87,6 +87,7 @@ interface FormValues {
   xrayPrivateKey: string;
   xrayPublicKey: string;
   xrayRealityMode: 'steal-others' | 'self-steal';
+  xrayRealityFallbackUpstream: string;
   xrayFlow: string;
   xrayFingerprint: string;
   xrayNetwork: 'raw' | 'xhttp' | 'ws' | 'grpc' | 'httpupgrade' | 'kcp';
@@ -219,6 +220,7 @@ function defaults(profile: Profile | null): FormValues {
     xrayPrivateKey: '',
     xrayPublicKey: '',
     xrayRealityMode: 'steal-others',
+    xrayRealityFallbackUpstream: '',
     xrayFlow: 'xtls-rprx-vision',
     xrayFingerprint: 'chrome',
     xrayNetwork: 'raw',
@@ -292,6 +294,7 @@ function defaults(profile: Profile | null): FormValues {
         xrayPrivateKey: (cfg.realityPrivateKey as string) ?? '',
         xrayPublicKey: (cfg.realityPublicKey as string) ?? '',
         xrayRealityMode: ((cfg.realityMode as 'steal-others' | 'self-steal') ?? 'steal-others'),
+        xrayRealityFallbackUpstream: (cfg.realityFallbackUpstream as string) ?? '',
         xrayFlow: (cfg.flow as string) ?? base.xrayFlow,
         xrayFingerprint: (cfg.fingerprint as string) ?? base.xrayFingerprint,
         xrayNetwork: ((cfg.network as 'raw' | 'xhttp' | 'ws' | 'grpc' | 'httpupgrade' | 'kcp') ?? 'raw'),
@@ -525,6 +528,10 @@ export function ProfileFormModal({ opened, onClose, profile, onSubmit, loading }
           realityPrivateKey: values.xrayPrivateKey,
           realityPublicKey: values.xrayPublicKey,
           realityMode: values.xrayRealityMode,
+          // G1: realistic-fallback upstream is only meaningful for self-steal;
+          // send '' otherwise so a stale value never trips the URL validation.
+          realityFallbackUpstream:
+            values.xrayRealityMode === 'self-steal' ? values.xrayRealityFallbackUpstream.trim() : '',
           flow: values.xrayFlow,
           fingerprint: values.xrayFingerprint,
           network: values.xrayNetwork,
@@ -988,6 +995,14 @@ export function ProfileFormModal({ opened, onClose, profile, onSubmit, loading }
                     <Text size="xs" c="dimmed">
                       {t('profiles.form.cfg.realityModeSelfStealHint')}
                     </Text>
+                  )}
+                  {form.values.xrayRealityMode === 'self-steal' && (
+                    <TextInput
+                      label={t('profiles.form.cfg.realityFallbackUpstreamLabel')}
+                      description={t('profiles.form.cfg.realityFallbackUpstreamDesc')}
+                      placeholder="https://example.com"
+                      {...form.getInputProps('xrayRealityFallbackUpstream')}
+                    />
                   )}
                   <Group grow align="flex-start">
                     <TextInput

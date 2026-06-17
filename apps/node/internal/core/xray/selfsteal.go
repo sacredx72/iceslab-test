@@ -15,6 +15,8 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"time"
 )
 
@@ -59,11 +61,13 @@ const selfStealLandingHTML = `<!DOCTYPE html>
 </html>
 `
 
-// selfStealServer is the running local TLS fallback. domain is tracked so the
-// adapter can detect a domain change and restart with a fresh cert.
+// selfStealServer is the running local TLS fallback. domain + upstream are
+// tracked so the adapter can detect a change and restart (fresh cert for a new
+// domain, or a new realistic-fallback target).
 type selfStealServer struct {
-	srv    *http.Server
-	domain string
+	srv      *http.Server
+	domain   string
+	upstream string
 }
 
 // generateSelfSignedCert builds an ECDSA P-256 self-signed leaf for `domain`,
@@ -94,26 +98,65 @@ func generateSelfSignedCert(domain string) (tls.Certificate, error) {
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: priv}, nil
 }
 
+// writeStaticLanding serves the benign default-install page: the zero-config
+// fallback when no realistic upstream is set, and the safety net when a
+// configured upstream is unreachable.
+func writeStaticLanding(w http.ResponseWriter) {
+	w.Header().Set("Server", "nginx")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = io.WriteString(w, selfStealLandingHTML)
+}
+
+// buildSelfStealHandler decides what a prober sees. With no upstream it's the
+// static landing page (G1 off, the K9-B default - self-signed cert + stub).
+// With an upstream (G1 realistic fallback) it reverse-proxies probe requests to
+// a real site, so a deep prober sees genuine content instead of a stub - the
+// cheapest strong lift against active probing. Any upstream error falls back to
+// the static page rather than leaking a Go proxy error that would flag the node.
+func buildSelfStealHandler(upstream string, logger *slog.Logger) (http.Handler, error) {
+	if upstream == "" {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			writeStaticLanding(w)
+		}), nil
+	}
+	target, err := url.Parse(upstream)
+	if err != nil || (target.Scheme != "http" && target.Scheme != "https") || target.Host == "" {
+		return nil, fmt.Errorf("invalid self-steal upstream %q", upstream)
+	}
+	rp := httputil.NewSingleHostReverseProxy(target)
+	baseDirector := rp.Director
+	rp.Director = func(req *http.Request) {
+		baseDirector(req)
+		// Send the upstream's own Host so it serves the intended vhost.
+		req.Host = target.Host
+	}
+	rp.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, perr error) {
+		logger.Warn("xray self-steal upstream failed; serving static landing",
+			"upstream", upstream, "err", perr)
+		writeStaticLanding(w)
+	}
+	return rp, nil
+}
+
 // startSelfSteal launches the local TLS 1.3 fallback on `addr` presenting a
 // self-signed cert for `domain`. MinVersion is pinned to TLS 1.3 because
 // REALITY requires its dest to negotiate 1.3 (a 1.2 fallback would make the
-// borrowed handshake detectable). The handler serves a generic landing page.
+// borrowed handshake detectable). The handler is the static landing page, or a
+// reverse proxy to `upstream` when set (G1 realistic fallback).
 //
-// `listenTLS` is injectable so tests can bind an ephemeral port.
-func startSelfSteal(addr, domain string, logger *slog.Logger) (*selfStealServer, error) {
+// `selfStealListen` is injectable so tests can bind an ephemeral port.
+func startSelfSteal(addr, domain, upstream string, logger *slog.Logger) (*selfStealServer, error) {
 	cert, err := generateSelfSignedCert(domain)
 	if err != nil {
 		return nil, fmt.Errorf("self-steal cert: %w", err)
 	}
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Server", "nginx")
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = io.WriteString(w, selfStealLandingHTML)
-	})
+	handler, err := buildSelfStealHandler(upstream, logger)
+	if err != nil {
+		return nil, err
+	}
 	srv := &http.Server{
 		Addr:    addr,
-		Handler: mux,
+		Handler: handler,
 		TLSConfig: &tls.Config{
 			MinVersion:   tls.VersionTLS13,
 			Certificates: []tls.Certificate{cert},
@@ -125,13 +168,14 @@ func startSelfSteal(addr, domain string, logger *slog.Logger) (*selfStealServer,
 		return nil, err
 	}
 	go func() {
-		logger.Info("xray self-steal TLS fallback listening", "addr", addr, "domain", domain)
+		logger.Info("xray self-steal TLS fallback listening",
+			"addr", addr, "domain", domain, "upstream", upstream)
 		// Certs are supplied via TLSConfig, so the cert/key file args are empty.
 		if err := srv.ServeTLS(ln, "", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("xray self-steal fallback failed", "err", err)
 		}
 	}()
-	return &selfStealServer{srv: srv, domain: domain}, nil
+	return &selfStealServer{srv: srv, domain: domain, upstream: upstream}, nil
 }
 
 // selfStealListen is split out so tests can swap in an ephemeral listener.

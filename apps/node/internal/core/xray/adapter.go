@@ -389,16 +389,16 @@ type xrayInboundCfgWire struct {
 	ServiceName        string   `json:"serviceName,omitempty"`
 	// B3: extra xray knobs. Defaults (0 / "" / false) render identically to
 	// pre-B3 configs, so omitting them keeps existing nodes byte-stable.
-	RealityXver         int    `json:"realityXver,omitempty"`
-	RealityMaxTimeDiff  int    `json:"realityMaxTimeDiff,omitempty"`
+	RealityXver        int `json:"realityXver,omitempty"`
+	RealityMaxTimeDiff int `json:"realityMaxTimeDiff,omitempty"`
 	// G: throttle unverified REALITY fallback (probe) connections. 0 = off,
 	// renders byte-identically to pre-G configs (omitempty).
-	RealityLimitFallbackUploadBytesPerSec   int `json:"realityLimitFallbackUploadBytesPerSec,omitempty"`
-	RealityLimitFallbackDownloadBytesPerSec int `json:"realityLimitFallbackDownloadBytesPerSec,omitempty"`
-	TLSRejectUnknownSni bool   `json:"tlsRejectUnknownSni,omitempty"`
-	XhttpMode           string `json:"xhttpMode,omitempty"`
-	XhttpPaddingBytes   string `json:"xhttpPaddingBytes,omitempty"`
-	GrpcMultiMode       bool   `json:"grpcMultiMode,omitempty"`
+	RealityLimitFallbackUploadBytesPerSec   int    `json:"realityLimitFallbackUploadBytesPerSec,omitempty"`
+	RealityLimitFallbackDownloadBytesPerSec int    `json:"realityLimitFallbackDownloadBytesPerSec,omitempty"`
+	TLSRejectUnknownSni                     bool   `json:"tlsRejectUnknownSni,omitempty"`
+	XhttpMode                               string `json:"xhttpMode,omitempty"`
+	XhttpPaddingBytes                       string `json:"xhttpPaddingBytes,omitempty"`
+	GrpcMultiMode                           bool   `json:"grpcMultiMode,omitempty"`
 	// Slice 24c part 3 — controls inbound `protocol` (vless vs trojan) and
 	// `settings.clients` shape. Empty/missing → vless (back-compat).
 	Subprotocol string `json:"subprotocol,omitempty"`
@@ -413,6 +413,10 @@ type xrayInboundCfgWire struct {
 	// self-steal makes the node run a local TLS fallback and point dest at it
 	// (see selfsteal.go), fixing the SNI-IP mismatch that RU-DPI detects.
 	RealityMode string `json:"realityMode,omitempty"`
+	// G1: realistic fallback. When set (and mode is self-steal), the local TLS
+	// fallback reverse-proxies probe requests to this real site instead of the
+	// stub landing page (see selfsteal.go). Empty = static landing (default).
+	RealityFallbackUpstream string `json:"realityFallbackUpstream,omitempty"`
 	// C3: cascade chaining fragments for this node's hop (link-in inbound,
 	// link-out outbound, routing rules). Generated panel-side by
 	// buildCascadeConfigs; nil/missing for plain (non-cascade) nodes.
@@ -446,36 +450,37 @@ func (a *Adapter) ApplyInbound(port int, rawCfg json.RawMessage) error {
 	}
 
 	newInbound := InboundConfig{
-		Tag:                a.cfg.Inbound.Tag,        // keep existing tag — not in wire
-		ListenHost:         a.cfg.Inbound.ListenHost, // install-time identity
-		ListenPort:         effectivePort,            // panel-pushed wins, install-time fallback
-		ApiPort:            a.cfg.Inbound.ApiPort,    // install-time identity (slice 24c stats)
-		RealityDest:        wire.RealityDest,
-		RealityServerNames: wire.RealityServerNames,
-		RealityPrivateKey:  wire.RealityPrivateKey,
-		RealityShortIDs:    wire.RealityShortIDs,
-		Flow:               wire.Flow,
-		Network:            wire.Network,
-		Path:               wire.Path,
-		HostHeader:         wire.Host,
-		ServiceName:        wire.ServiceName,
-		Subprotocol:        wire.Subprotocol,
-		Security:           wire.Security,
-		TLSServerName:      wire.TLSServerName,
-		TLSCert:            wire.TLSCert,
-		TLSKey:             wire.TLSKey,
-		RealityMode:        wire.RealityMode,
+		Tag:                     a.cfg.Inbound.Tag,        // keep existing tag - not in wire
+		ListenHost:              a.cfg.Inbound.ListenHost, // install-time identity
+		ListenPort:              effectivePort,            // panel-pushed wins, install-time fallback
+		ApiPort:                 a.cfg.Inbound.ApiPort,    // install-time identity (slice 24c stats)
+		RealityDest:             wire.RealityDest,
+		RealityServerNames:      wire.RealityServerNames,
+		RealityPrivateKey:       wire.RealityPrivateKey,
+		RealityShortIDs:         wire.RealityShortIDs,
+		Flow:                    wire.Flow,
+		Network:                 wire.Network,
+		Path:                    wire.Path,
+		HostHeader:              wire.Host,
+		ServiceName:             wire.ServiceName,
+		Subprotocol:             wire.Subprotocol,
+		Security:                wire.Security,
+		TLSServerName:           wire.TLSServerName,
+		TLSCert:                 wire.TLSCert,
+		TLSKey:                  wire.TLSKey,
+		RealityMode:             wire.RealityMode,
+		RealityFallbackUpstream: wire.RealityFallbackUpstream,
 		// B3: extra xray knobs (REALITY xver/maxTimeDiff, TLS rejectUnknownSni,
 		// XHTTP mode/padding, gRPC multiMode). Zero-values render as before.
-		RealityXver:         wire.RealityXver,
-		RealityMaxTimeDiff:  wire.RealityMaxTimeDiff,
+		RealityXver:        wire.RealityXver,
+		RealityMaxTimeDiff: wire.RealityMaxTimeDiff,
 		// G: probe-resistance fallback rate-limit (bytes/sec, 0 = off).
 		RealityLimitFallbackUploadBytesPerSec:   wire.RealityLimitFallbackUploadBytesPerSec,
 		RealityLimitFallbackDownloadBytesPerSec: wire.RealityLimitFallbackDownloadBytesPerSec,
-		TLSRejectUnknownSni: wire.TLSRejectUnknownSni,
-		XhttpMode:           wire.XhttpMode,
-		XhttpPaddingBytes:   wire.XhttpPaddingBytes,
-		GrpcMultiMode:       wire.GrpcMultiMode,
+		TLSRejectUnknownSni:                     wire.TLSRejectUnknownSni,
+		XhttpMode:                               wire.XhttpMode,
+		XhttpPaddingBytes:                       wire.XhttpPaddingBytes,
+		GrpcMultiMode:                           wire.GrpcMultiMode,
 	}
 
 	a.mu.Lock()
@@ -516,7 +521,8 @@ func inboundEqual(a, b InboundConfig) bool {
 		a.TLSServerName != b.TLSServerName ||
 		a.TLSCert != b.TLSCert ||
 		a.TLSKey != b.TLSKey ||
-		a.RealityMode != b.RealityMode {
+		a.RealityMode != b.RealityMode ||
+		a.RealityFallbackUpstream != b.RealityFallbackUpstream {
 		return false
 	}
 	if !stringSliceEqual(a.RealityServerNames, b.RealityServerNames) {
@@ -654,16 +660,22 @@ func (a *Adapter) reconcileSelfSteal(ctx context.Context, inbound InboundConfig)
 	if domain == "" {
 		want = false
 	}
+	// G1 realistic-fallback target (only meaningful when self-steal is on).
+	upstream := ""
+	if want {
+		upstream = inbound.RealityFallbackUpstream
+	}
 
 	a.mu.Lock()
 	cur := a.selfSteal
 	a.mu.Unlock()
 
-	// Already in the desired state: off-and-nil, or on-with-same-domain.
+	// Already in the desired state: off-and-nil, or on with the same domain AND
+	// upstream (a changed upstream restarts the fallback with the new target).
 	if !want && cur == nil {
 		return
 	}
-	if want && cur != nil && cur.domain == domain {
+	if want && cur != nil && cur.domain == domain && cur.upstream == upstream {
 		return
 	}
 
@@ -680,7 +692,7 @@ func (a *Adapter) reconcileSelfSteal(ctx context.Context, inbound InboundConfig)
 		return
 	}
 
-	srv, err := startSelfSteal(selfStealAddr, domain, a.logger)
+	srv, err := startSelfSteal(selfStealAddr, domain, upstream, a.logger)
 	if err != nil {
 		// Non-fatal: xray still starts, but REALITY's dest (127.0.0.1:8443)
 		// won't answer until the next reconcile. Surface loudly.

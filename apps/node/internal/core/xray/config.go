@@ -62,6 +62,12 @@ type InboundConfig struct {
 	//     withDefaults rewrites RealityDest to it.
 	RealityMode string
 
+	// RealityFallbackUpstream (G1) is the real site the self-steal local TLS
+	// fallback reverse-proxies probe requests to, so a deep prober sees genuine
+	// content instead of the stub landing page. Empty = static landing (the
+	// default). Only meaningful when RealityMode is self-steal.
+	RealityFallbackUpstream string
+
 	// Flow controls Vision (xtls-rprx-vision) on the client side; empty disables.
 	Flow string
 

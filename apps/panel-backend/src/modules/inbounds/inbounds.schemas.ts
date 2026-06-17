@@ -96,6 +96,11 @@ export const XrayConfigSchema = z.object({
    * subscription all already read it; the schema was the missing link.
    */
   realityMode: z.enum(['steal-others', 'self-steal']).default('steal-others'),
+  /** G1 realistic fallback (probe resistance). When set and realityMode is
+   *  'self-steal', the node's local TLS fallback reverse-proxies probe requests
+   *  to this real site instead of a stub page, so a deep prober sees genuine
+   *  content. Empty = static landing page (the default). http(s) URL. */
+  realityFallbackUpstream: z.string().url().max(512).or(z.literal('')).default(''),
   // Mantine Select returns null when the empty option is picked. Coerce to
   // '' so the schema accepts the "no flow" choice the same way it accepts
   // 'xtls-rprx-vision'. Empty string is the canonical "no flow" wire value.

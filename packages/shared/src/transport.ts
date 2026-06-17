@@ -116,6 +116,10 @@ export interface XrayInboundCfg {
    *     domain so SNI and IP stay consistent. Set serverNames to a domain that
    *     resolves to the node IP; the node ignores realityDest in this mode. */
   realityMode?: 'steal-others' | 'self-steal';
+  /** G1 - real site the self-steal local TLS fallback reverse-proxies probe
+   *  requests to (so a prober sees genuine content). Empty = static landing.
+   *  Only used when realityMode is 'self-steal'. */
+  realityFallbackUpstream?: string;
   flow: 'xtls-rprx-vision' | 'none';
   fingerprint: string;            // chrome / firefox / safari / etc
   network: 'raw' | 'xhttp' | 'ws' | 'grpc' | 'httpupgrade' | 'kcp';

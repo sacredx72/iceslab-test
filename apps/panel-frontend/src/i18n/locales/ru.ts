@@ -339,6 +339,9 @@ export default {
         realityModeSelfSteal: 'self-steal (локальный fallback, РФ-2026)',
         realityModeSelfStealHint:
           'Self-steal: нода поднимает локальный TLS-fallback, dest REALITY смотрит на него. В поле ниже укажите домен, резолвящийся в IP ЭТОЙ ноды, чтобы SNI и IP совпадали (переживает whitelist-shutdown в РФ). dest игнорируется.',
+        realityFallbackUpstreamLabel: 'Реалистичный fallback (G1, опц.)',
+        realityFallbackUpstreamDesc:
+          'http(s) URL реального сайта: локальный fallback reverse-proxy на него отдаёт зонду настоящий контент вместо заглушки. Пусто = статичная страница.',
         realitySelfStealDomainLabel: 'Свой домен (должен указывать на IP ноды)',
         realitySelfStealDomainDesc:
           'A-запись этого домена на IP ЭТОЙ ноды. Нода поднимает локальный TLS-серт под него, REALITY использует его как serverName: SNI и IP консистентны.',

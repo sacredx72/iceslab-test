@@ -523,6 +523,9 @@ export interface XrayInboundConfig {
   xhttpMode?: 'auto' | 'packet-up' | 'stream-up' | 'stream-one';
   xhttpPaddingBytes?: string;
   grpcMultiMode?: boolean;
+  /** G1 - realistic fallback: real site URL the self-steal local TLS fallback
+   *  reverse-proxies probe requests to. Empty = static landing page. */
+  realityFallbackUpstream?: string;
 }
 
 export interface AmneziawgObfuscation {
@@ -905,6 +908,8 @@ export interface TestConnectResult {
   certCn?: string;
   // TLS-only — negotiated version. REALITY needs the dest to speak TLSv1.3.
   tlsVersion?: string;
+  // H1 (dest) - negotiated ALPN (e.g. "h2"); a CDN-grade dest speaks HTTP/2.
+  alpn?: string;
   error?: string;
   notes?: string;
 }

@@ -29,6 +29,9 @@ export interface ProbeResult {
   // TLS-only — negotiated protocol version (e.g. "TLSv1.3"). REALITY REQUIRES
   // the dest to speak TLS 1.3; a 1.2-only dest is a silent mis-config.
   tlsVersion?: string;
+  // H1 (dest only) - negotiated ALPN (e.g. "h2"). A CDN-grade REALITY dest
+  // speaks HTTP/2; a dest without h2 is a weaker, more detectable masquerade.
+  alpn?: string;
   error?: string;
   // Hint for the UI when we couldn't run a real probe (UDP-based
   // protocols fall back to a TCP port reachability check, which is
@@ -59,6 +62,29 @@ export function parseRealityDestTarget(
   return { host, port, sni };
 }
 
+/**
+ * H1 - turn what the dest TLS probe observed into a health note, or undefined
+ * when the dest looks CDN-grade. A good REALITY masquerade target speaks BOTH
+ * TLS 1.3 (REALITY borrows its ServerHello) AND HTTP/2 (real CDNs do; a dest
+ * without h2 stands out under behavioral DPI). Pure, so it stays unit-tested
+ * while the TLS probe itself is field-validated. `alpn` undefined = not probed
+ * (skip the h2 check); '' = probed but the dest negotiated no ALPN.
+ */
+export function realityDestNote(
+  tlsVersion: string | undefined,
+  alpn: string | undefined,
+): string | undefined {
+  const issues: string[] = [];
+  if (tlsVersion !== undefined && tlsVersion !== 'TLSv1.3') {
+    issues.push(`negotiated ${tlsVersion}, REALITY needs TLS 1.3`);
+  }
+  if (alpn !== undefined && alpn !== 'h2') {
+    issues.push(`no HTTP/2 (ALPN ${alpn || 'absent'}); a CDN-grade dest speaks h2`);
+  }
+  if (issues.length === 0) return undefined;
+  return `REALITY dest: ${issues.join('; ')}. Prefer a major CDN that supports TLS 1.3 + HTTP/2.`;
+}
+
 const TLS_PROTOCOLS = new Set(['xray', 'naive']);
 // UDP-based — TCP probe doesn't actually validate the protocol, but it does
 // check the route + firewall. Admin gets a yellow note pointing this out.
@@ -80,6 +106,9 @@ async function probe(target: {
   isUdp: boolean;
   isTls: boolean;
   kind: 'endpoint' | 'dest';
+  // H1 - ALPN protocols to offer (the dest probe offers h2 to read what the
+  // masquerade target negotiates). Unset on endpoint probes.
+  alpn?: string[];
 }): Promise<ProbeResult> {
   const base: Pick<ProbeResult, 'bindingId' | 'hostId' | 'hostRemark' | 'protocol' | 'nodeName' | 'endpoint' | 'port' | 'kind'> = {
     bindingId: target.bindingId,
@@ -105,7 +134,10 @@ async function probe(target: {
         port: target.port,
         servername: target.sni!,
         rejectUnauthorized: false,
-        // ALPN chosen by adapter — leave blank, server picks.
+        // H1: offer ALPN for the dest probe so we can read what the masquerade
+        // target negotiates (a CDN-grade dest speaks h2). Endpoint probes leave
+        // it unset so the server picks as before.
+        ...(target.alpn ? { ALPNProtocols: target.alpn } : {}),
       });
       const onResult = (r: ProbeResult) => {
         sock.destroy();
@@ -134,14 +166,18 @@ async function probe(target: {
                 ? sanRaw
                 : undefined) || undefined;
         const tlsVersion = sock.getProtocol() ?? undefined;
-        // K10 — REALITY borrows the dest's TLS1.3 ServerHello. A dest that
-        // only speaks 1.2 makes REALITY fail at runtime; flag it on the
-        // dest probe specifically (an endpoint TLS1.2 is the client's own
-        // cert, irrelevant here).
-        const destNotTls13 =
-          target.kind === 'dest' && tlsVersion !== undefined && tlsVersion !== 'TLSv1.3'
-            ? `REALITY needs TLS 1.3, but dest negotiated ${tlsVersion}. Pick a dest that supports TLS 1.3.`
+        // H1 - for the dest probe, read the negotiated ALPN and build a health
+        // note covering BOTH TLS 1.3 (REALITY borrows the dest ServerHello) and
+        // HTTP/2 (a CDN-grade dest speaks h2). An endpoint's TLS version / ALPN
+        // is the client's own and irrelevant here, so we only annotate the dest.
+        const negotiatedAlpn =
+          target.kind === 'dest'
+            ? sock.alpnProtocol === false || sock.alpnProtocol == null
+              ? ''
+              : sock.alpnProtocol
             : undefined;
+        const destNote =
+          target.kind === 'dest' ? realityDestNote(tlsVersion, negotiatedAlpn) : undefined;
         onResult({
           ...base,
           probe: 'tls',
@@ -150,7 +186,8 @@ async function probe(target: {
           latencyMs: Date.now() - start,
           certCn: cn,
           tlsVersion,
-          ...(destNotTls13 ? { notes: destNotTls13 } : {}),
+          ...(negotiatedAlpn !== undefined ? { alpn: negotiatedAlpn } : {}),
+          ...(destNote ? { notes: destNote } : {}),
         });
       });
       sock.once('error', (err) => {
@@ -287,6 +324,8 @@ export async function testProfileConnect(profileId: string): Promise<ProbeResult
         isUdp: false,
         isTls: true,
         kind: 'dest',
+        // H1: offer h2 so the probe can verify the dest speaks HTTP/2.
+        alpn: ['h2', 'http/1.1'],
       });
     }
   }
