@@ -144,6 +144,24 @@ type HostMetricsResponse struct {
 	CollectedAt   string           `json:"collectedAt"`
 }
 
+// ───── GET /ufwPorts ─────
+//
+// G4 probe-exposure: the agent reports the ufw-allowed inbound ports so the
+// panel can compare them to the expected set (binding ports + SSH + mTLS port)
+// and warn the operator about anything unexpected left open to the internet.
+
+type UfwPortDto struct {
+	Port  int    `json:"port"`
+	Proto string `json:"proto"` // "tcp" | "udp"
+}
+
+type UfwPortsResponse struct {
+	// Managed=false means ufw is not installed on the host; the panel skips
+	// the exposure check rather than treating it as an error.
+	Managed bool         `json:"managed"`
+	Ports   []UfwPortDto `json:"ports"`
+}
+
 // ───── Common error shape ─────
 
 type ErrorResponse struct {

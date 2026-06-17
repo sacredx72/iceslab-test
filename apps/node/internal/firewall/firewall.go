@@ -19,6 +19,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os/exec"
+	"regexp"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -75,4 +78,61 @@ func Allow(ctx context.Context, logger *slog.Logger, port int, proto string) {
 	allowedSpecs[spec] = struct{}{}
 	allowedMu.Unlock()
 	logger.Info("firewall.Allow: rule ensured", "spec", spec)
+}
+
+// AllowedPort is a single ufw-allowed inbound rule (G4 probe-exposure).
+type AllowedPort struct {
+	Port  int
+	Proto string // "tcp" | "udp"
+}
+
+// ufwRuleRe matches a `ufw status` line that allows a single port, e.g.
+// "443/tcp                    ALLOW       Anywhere" or
+// "1337/tcp                   ALLOW       203.0.113.5". The v6 dupes ufw prints
+// ("443/tcp (v6) ALLOW ...") DON'T match (the " (v6)" breaks the proto->ALLOW
+// adjacency), which conveniently de-duplicates v4/v6. Port ranges
+// ("20000:50000/udp") and bare-port rules (no proto) are intentionally skipped.
+var ufwRuleRe = regexp.MustCompile(`^(\d{1,5})/(tcp|udp)\s+ALLOW`)
+
+// parseUfwStatus extracts the distinct (port, proto) allows from `ufw status`
+// output. Pure + unit-tested; ListAllowed wraps it around the actual command.
+func parseUfwStatus(out string) []AllowedPort {
+	seen := make(map[string]struct{})
+	ports := []AllowedPort{}
+	for _, line := range strings.Split(out, "\n") {
+		m := ufwRuleRe.FindStringSubmatch(strings.TrimSpace(line))
+		if m == nil {
+			continue
+		}
+		port, err := strconv.Atoi(m[1])
+		if err != nil || port <= 0 || port > 65535 {
+			continue
+		}
+		key := m[1] + "/" + m[2]
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		ports = append(ports, AllowedPort{Port: port, Proto: m[2]})
+	}
+	return ports
+}
+
+// ListAllowed returns the (port, proto) rules ufw currently allows IN.
+// Best-effort, mirroring Allow's contract: returns (nil, nil) when ufw isn't
+// installed so the panel treats the node as "unmanaged" (skip the exposure
+// check) rather than erroring. When ufw IS present it returns a non-nil slice
+// (possibly empty), so callers can distinguish "no ufw" from "ufw, no rules".
+func ListAllowed(ctx context.Context, logger *slog.Logger) ([]AllowedPort, error) {
+	if _, err := exec.LookPath("ufw"); err != nil {
+		logger.Debug("firewall.ListAllowed: ufw not installed, skipping")
+		return nil, nil
+	}
+	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(cctx, "ufw", "status").CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("ufw status: %w (%s)", err, string(out))
+	}
+	return parseUfwStatus(string(out)), nil
 }

@@ -211,6 +211,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/applyInbounds", s.handleApplyInbounds)
 	mux.HandleFunc("/stats", s.handleStats)
 	mux.HandleFunc("/metrics", s.handleMetrics)
+	mux.HandleFunc("/ufwPorts", s.handleUfwPorts)
 	return mux
 }
 
@@ -250,6 +251,28 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		status = "degraded"
 	}
 	writeJSON(w, http.StatusOK, dto.HealthcheckResponse{Status: status, Cores: cores})
+}
+
+// handleUfwPorts (G4 probe-exposure) reports the ufw-allowed inbound ports so
+// the panel can flag anything open beyond the expected set (binding ports +
+// SSH + the mTLS agent port). Read-only; inherits the server's mTLS gate like
+// every other handler. ufw absent -> Managed=false so the panel skips.
+func (s *Server) handleUfwPorts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "GET only")
+		return
+	}
+	allowed, err := firewall.ListAllowed(r.Context(), s.logger)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "UFW_QUERY_FAILED", err.Error())
+		return
+	}
+	ports := make([]dto.UfwPortDto, 0, len(allowed))
+	for _, p := range allowed {
+		ports = append(ports, dto.UfwPortDto{Port: p.Port, Proto: p.Proto})
+	}
+	// allowed == nil only when ufw isn't installed -> Managed=false.
+	writeJSON(w, http.StatusOK, dto.UfwPortsResponse{Managed: allowed != nil, Ports: ports})
 }
 
 func (s *Server) handleAddUser(w http.ResponseWriter, r *http.Request) {
