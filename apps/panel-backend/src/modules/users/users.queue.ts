@@ -95,6 +95,7 @@ async function syncAddUser(userId: string): Promise<void> {
     where: { id: userId, deletedAt: null },
     select: {
       id: true,
+      status: true,
       shortId: true,
       username: true,
       hysteriaPassword: true,
@@ -105,6 +106,17 @@ async function syncAddUser(userId: string): Promise<void> {
   });
   if (!user) {
     getLogger().info(`[worker:node-users] addUser ${userId} — user not found, skipping`);
+    return;
+  }
+  // #4 - status-gate. A stale addUser (enqueued before a flip to
+  // limited/expired, or racing a removeUser for the same user) must not
+  // resurrect a non-active user on the nodes. Together with syncRemoveUser's
+  // gate this makes the node user-set converge to the live DB status no matter
+  // what order the add/remove jobs happen to run in.
+  if (user.status !== 'active') {
+    getLogger().info(
+      `[worker:node-users] addUser ${userId} — status=${user.status}, not active, skipping`,
+    );
     return;
   }
 
@@ -129,7 +141,21 @@ async function syncAddUser(userId: string): Promise<void> {
 }
 
 async function syncRemoveUser(userId: string): Promise<void> {
-  // User may be soft-deleted by now — we still want every node to drop it.
+  // #4 - status-gate. Skip the removal if the user is currently active and not
+  // soft-deleted: a stale removeUser (the user was flipped back to active by a
+  // traffic reset after this job was enqueued, or it races an addUser) must
+  // not drop a live user. A non-active, soft-deleted, or missing user proceeds
+  // to removal (idempotent node-side no-op if it is already gone). Pairs with
+  // syncAddUser's gate so the terminal node state always matches DB status.
+  const user = await prisma.user.findFirst({
+    where: { id: userId },
+    select: { status: true, deletedAt: true },
+  });
+  if (user && user.deletedAt === null && user.status === 'active') {
+    getLogger().info(`[worker:node-users] removeUser ${userId} — user is active, skipping`);
+    return;
+  }
+
   const req: RemoveUserRequest = { userId };
   const nodes = await fetchActiveNodes();
   await fanOut(

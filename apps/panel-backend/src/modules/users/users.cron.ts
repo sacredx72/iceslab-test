@@ -81,38 +81,26 @@ export async function findExpiredUsers(): Promise<number> {
 
   const ids = users.map((u) => u.id);
 
-  // Enqueue removeUser jobs BEFORE flipping the DB status. eventBus.emit
-  // is fire-and-forget, so the original "updateMany then emit" order lost
-  // the sync entirely if the process died between the two — user stayed
-  // 'expired' in DB (so the next cron filter on status='active' skipped
-  // them) but kept living on every node forever. With this order: a crash
-  // mid-loop leaves jobs enqueued in Redis; survivors stay 'active' and
-  // get re-detected next tick (removeUser is idempotent on the node side).
+  // #4 - flip the DB status BEFORE enqueuing. syncRemoveUser now status-gates
+  // (it skips removal for a still-active row), so a removeUser job that runs
+  // while the user is still 'active' would skip and strand them on every node.
+  // Flip first, then enqueue; reconcileOrphanNodeUsers is the crash backstop if
+  // the process dies between the flip and the enqueue. This is the
+  // "update-then-enqueue" order the worker's new status-gate calls for.
   //
-  // CONTRACT: the removeUser worker (users.queue.ts syncRemoveUser) does
-  // NOT fetch the user row and does NOT gate on status. It just sends a
-  // userId to every node. So enqueueing while status is still 'active' is
-  // safe — there is no "active-gate" downstream to silently skip. If that
-  // ever changes, this ordering must change back to update-then-enqueue.
-  // Bug #8 fix (reverts wave-14 #12 jobId here): NO dedup jobId on the
-  // expiry path. A user transitions active -> expired exactly once (after the
-  // flip they're no longer 'active', so later ticks don't re-select them), so
-  // there is no repeated-enqueue load to dedup against. The `removeUser-${id}`
-  // jobId only created a bug: if the user was re-activated and re-expired
-  // within the 1h removeOnComplete window, the completed job still "owned" the
-  // jobId and the new enqueue was a silent no-op, leaving them connected.
-  // removeUser is idempotent on the node side, so an occasional duplicate
-  // (e.g. reconcile also enqueues) is harmless. (reconcile keeps its own
-  // day-bucket jobId because IT re-selects orphans every tick.)
+  // No dedup jobId on the expiry path: a user transitions active -> expired
+  // exactly once (after the flip later ticks don't re-select them), so there
+  // is no repeated-enqueue load to dedup. removeUser is idempotent node-side,
+  // so an occasional duplicate (reconcile also enqueues) is harmless.
   // B11: one addBulk instead of N awaited add()s — a 1000-user expiry batch
   // was 1000 sequential Redis round-trips; addBulk pipelines them.
-  await nodeUsersQueue.addBulk(
-    ids.map((id) => ({ name: 'removeUser', data: { userId: id } })),
-  );
   await prisma.user.updateMany({
     where: { id: { in: ids } },
     data: { status: 'expired' },
   });
+  await nodeUsersQueue.addBulk(
+    ids.map((id) => ({ name: 'removeUser', data: { userId: id } })),
+  );
 
   // Event handlers still fire (Telegram alerts, audit log) but they no
   // longer carry the sync invariant — that's covered by the direct
@@ -142,17 +130,17 @@ export async function findExceededTrafficUsers(): Promise<number> {
 
   const ids = rows.map((r) => r.id);
 
-  // Same crash-safety argument as findExpiredUsers — enqueue before flip.
-  // Bug #8: no dedup jobId here either (same one-time-transition reasoning;
-  // see findExpiredUsers). A limited user re-activated then re-limited within
-  // the hour must still get removed. B11: addBulk over per-id awaited add.
-  await nodeUsersQueue.addBulk(
-    ids.map((id) => ({ name: 'removeUser', data: { userId: id } })),
-  );
+  // #4 - flip THEN enqueue (see findExpiredUsers): syncRemoveUser status-gates,
+  // so the row must be 'limited' before the removeUser job runs or it would
+  // skip a still-active user. reconcile is the crash backstop. No dedup jobId
+  // (one-time transition); removeUser is idempotent node-side. B11: addBulk.
   await prisma.user.updateMany({
     where: { id: { in: ids } },
     data: { status: 'limited' },
   });
+  await nodeUsersQueue.addBulk(
+    ids.map((id) => ({ name: 'removeUser', data: { userId: id } })),
+  );
 
   for (const id of ids) {
     eventBus.emit('user.status-changed', { userId: id, from: 'active', to: 'limited' });
